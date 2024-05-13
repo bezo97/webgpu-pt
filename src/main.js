@@ -27,7 +27,7 @@ const sceneObjects = [
     object_type: 0,
     material_index: 1,
     position: [1.5, 0.5, -0.5],
-    scale: 0.5,
+    scale: 0.25,
   },
   {
     object_type: 0,
@@ -59,7 +59,7 @@ const sceneMaterials = [
     material_type: 0,
     albedo: [1, 1, 1],
     ior: 0,
-    emission: [5, 5, 5],
+    emission: [40, 40, 40],
   },
   {
     material_type: 2,
@@ -82,9 +82,10 @@ const canvas = document.getElementById("main_display");
 canvas.onmousemove = (event) => {
   if (event.buttons == 1) {
     const mouseX = event.offsetX / canvas.width;
-    const mouseY = event.offsetY / canvas.height;
+    const mouseY = 1 - event.offsetY / canvas.height;
     sceneSettings.sample = 0;
-    sceneObjects[0].position[0] = -3 + 6 * mouseX;
+    sceneObjects[1].position[0] = -3 + 6 * mouseX;
+    sceneObjects[1].position[1] = 4 * mouseY;
   }
 };
 setInterval(() => {
