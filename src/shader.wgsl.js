@@ -2,7 +2,7 @@ export default `
 
 //no pre-processor duh
 const PI = 3.14159265;
-const EPS = 0.00001;
+const EPS = 2e-5;
 const max_bounces = 6;
 const no_hit = Hit(-1, -1.0, vec3f(0.0));
 
@@ -57,6 +57,8 @@ struct FragmentStageOutput {
     @location(1) lastFrame: vec4f,
 }
 
+//TODO: consider constant memory buffer?
+
 @group(0) @binding(0) var<uniform> settings: SceneSettings;
 
 @group(0) @binding(1) var<storage, read> scene_objects: array<SceneObject>;
@@ -65,6 +67,7 @@ struct FragmentStageOutput {
 
 @group(1) @binding(0) var lastFrameTexture: texture_2d<f32>;
 
+//TODO: remove and pass as argument
 var<private> seed: u32 = 12345;
 
 //pcg hash implementation is wgsl
@@ -189,9 +192,15 @@ fn get_brdf_ray(ray_in: Ray, hit: Hit) -> Ray {
     }
 
     var hit_pos = ray_in.pos + ray_in.dir * hit.distance;
+
+    //TODO: importance sample by fresnel weight
+    //fresnel weight = ..
+    //p_choice = fresnel weight
+    //return weight too
     
     switch(i32(hit_material.material_type)) {
         case 0, default: { //diffuse
+            //weight:albedo
             hit_pos += normal * EPS;//move back a bit to avoid self-intersection problems
             return Ray(hit_pos, cosWeightedRandomHemisphereDirection(normal));
         }
@@ -281,20 +290,19 @@ fn trace_path(cam_ray: Ray) -> vec3f
 	{
 
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
-		// if (bounce > 3)//only after a few bounces (only apply on indirect rays)
-		// {
-        //     let p_survive = length(throughput)/3.0;
-		// 	let roulette = pcg_hash_f(&seed);
-		// 	if (roulette < p_survive)
-		// 	{//alive
-		// 		throughput *= 1.0/p_survive;//compensate
-		// 	}
-		// 	else
-		// 	{//die
-		// 		//result = ?
-		// 		break;
-		// 	}
-		// }
+		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
+		{
+            let p_survive = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.0, 1.0);
+			let roulette = pcg_hash_f(&seed);
+			if (roulette < p_survive)
+			{//alive
+				throughput *= 1.0/p_survive;//TODO: check paper
+			}
+			else
+			{//die
+				break;
+			}
+		}
 
 
 		var hit = intersect_scene(ray);
@@ -302,10 +310,10 @@ fn trace_path(cam_ray: Ray) -> vec3f
         if(hit.object_index == -1)
         {//no object hit, sky
             var sky = sky_emission(ray.dir);
-            if(bounce == 0)
-            {//first hit sky
-                sky /= sky_strength;
-            }
+            // if(bounce == 0)
+            // {//first hit sky
+            //     sky /= sky_strength;
+            // }
 			result += throughput * sky;
             return result;
         }
@@ -313,16 +321,19 @@ fn trace_path(cam_ray: Ray) -> vec3f
         let hit_object = scene_objects[hit.object_index];
         let hit_material = scene_materials[i32(hit_object.material_index)];
 
+
+        //direct light sampling
+        //if(cam_ray.dir.x<0.0){
+		    //result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+        //}
+
+        result += throughput * hit_material.emission;
+
         //TODO: calculate reflectance from material
         let reflectance = hit_material.albedo;
         throughput *= reflectance;
         
-        result += throughput * hit_material.emission;
-
-        //direct light sampling
-        //if(cam_ray.dir.x<0.0){
-		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
-        //}
+        //ray,weight = brdf.scatter ray hit
 
         ray = get_brdf_ray(ray, hit);
         bounce++;
@@ -350,7 +361,7 @@ fn tonemap(color_in: vec3f) -> vec3f
     color = ACESFilm(color);
 
     //gamma correction (convert RGB to SRGB), this is the last step
-    let inv_gamma = 1.0/2.2;//TODO: setting
+    let inv_gamma = 1.0/2.4;
     if (color.x <= 0.0031308) {
         color.x = color.x * 12.92;
     } else {
@@ -375,15 +386,36 @@ fn vertexMain(@location(0) pos: vec2f) -> @builtin(position) vec4f {
     return vec4f(pos, 0, 1);
 }
 
+fn tent(x_in: f32) -> f32 {
+    var x = x_in;
+    x = 2.f * x - 1.f;
+    if (x == 0) { return 0.0; }
+    return x / sqrt(abs(x)) - sign(x);
+}
+
+// Hash function for 32 bit uint
+// Found here: https://nullprogram.com/blog/2018/07/31/
+fn lowbias32(x_in: u32) -> u32
+{
+    var x = x_in;
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
 @fragment
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> FragmentStageOutput {
-    seed = u32(settings.sample)^u32(settings.sample*coord_in.x)^u32(coord_in.x*coord_in.y);
+    let bigprime: u32 = 1717885903;
+    seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.sample);
     //calculate ray
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0);
     let tlc = settings.cam.forward*fov + settings.cam.up*(settings.height/2) - settings.cam.right*(settings.width/2);
     
-    let aawidth = 1.5;//TODO: setting
-    let aa_offset = aawidth * (pcg_hash_2f(&seed) - vec2f(0.5));
+    let samples = pcg_hash_2f(&seed);
+    let aa_offset = vec2f(tent(samples.x)+0.5, tent(samples.y)+0.5);
 
     let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
     let ray = Ray(settings.cam.position, raydir);
@@ -391,12 +423,8 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> FragmentStageOutput {
     var trace_result = trace_path(ray);
 
     var frame_result = tonemap(trace_result);
-
-    //aa cone filter
-    let aasf = 1.2;//TODO: aa sharpness factor setting
-    let wr = clamp(1.0 - aasf*length(aa_offset/aawidth), 0.0, 1.0);
-    frame_result *= wr * sqrt(1.0 + aawidth*aawidth);
     
+    //TODO: does not converge possibly because of precision
     let last_frame = textureLoad(lastFrameTexture, vec2i(floor(coord_in.xy)), 0).rgb;
 	let blend_factor = 1.0 / (settings.sample + 1);
     let output = vec4(mix(last_frame, frame_result, blend_factor), 1.0);

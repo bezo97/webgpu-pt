@@ -150,6 +150,7 @@ const sceneMaterialsBuffer = device.createBuffer({
   size: 4 * 4 * 4 * sceneMaterials.length,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
+//TODO: consider using a single buffer
 
 //setup shader
 const rendererShaderModule = device.createShaderModule({
@@ -268,6 +269,8 @@ async function recordRenderPass1(passEncoder, pingpong) {
 async function renderFrame() {
   //update state
   sceneSettings.time = startTime - new Date().getTime() / 1000;
+  sceneObjects[0].position[0] = -3 + 6 * Math.sin(sceneSettings.time);
+  sceneSettings.sample = 0;
 
   //wait for previous frame finish
   await device.queue.onSubmittedWorkDone();
