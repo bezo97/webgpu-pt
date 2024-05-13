@@ -1,6 +1,7 @@
 import shaderSource from "./shader.wgsl.js";
 
 const startTime = new Date().getTime() / 1000;
+let frameCounter = 0;
 const sceneSettings = {
   cam: {
     position: [0.0, 1.0, -10.0],
@@ -86,6 +87,11 @@ canvas.onmousemove = (event) => {
     sceneObjects[0].position[0] = -3 + 6 * mouseX;
   }
 };
+setInterval(() => {
+  //show fps in title
+  document.title = frameCounter + " fps";
+  frameCounter = 0;
+}, 1000);
 //get gpu device
 if (!navigator.gpu) throw new Error("WebGPU not supported on this browser.");
 const adapter = await navigator.gpu.requestAdapter();
@@ -269,11 +275,10 @@ async function recordRenderPass1(passEncoder, pingpong) {
 async function renderFrame() {
   //update state
   sceneSettings.time = startTime - new Date().getTime() / 1000;
-  sceneObjects[0].position[0] = -3 + 6 * Math.sin(sceneSettings.time);
-  sceneSettings.sample = 0;
 
   //wait for previous frame finish
   await device.queue.onSubmittedWorkDone();
+  frameCounter++;
 
   //update uniforms
   device.queue.writeBuffer(
@@ -367,5 +372,4 @@ async function renderFrame() {
 
 //first frame starts on load
 requestAnimationFrame(renderFrame);
-
 export default function main() {}

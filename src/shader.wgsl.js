@@ -414,17 +414,23 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> FragmentStageOutput {
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0);
     let tlc = settings.cam.forward*fov + settings.cam.up*(settings.height/2) - settings.cam.right*(settings.width/2);
     
-    let samples = pcg_hash_2f(&seed);
-    let aa_offset = vec2f(tent(samples.x)+0.5, tent(samples.y)+0.5);
+    var acc = vec3f(0.0);
+    let samples = 256;//TODO: make adaptive to target framerate
+    for (var i = 0; i < samples; i++)
+    {
+        let samples = pcg_hash_2f(&seed);
+        let aa_offset = vec2f(tent(samples.x)+0.5, tent(samples.y)+0.5);
 
-    let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
-    let ray = Ray(settings.cam.position, raydir);
+        let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
+        let ray = Ray(settings.cam.position, raydir);
 
-    var trace_result = trace_path(ray);
+        acc += trace_path(ray);
+    }
+    acc /= f32(samples);
 
-    var frame_result = tonemap(trace_result);
+    var frame_result = tonemap(acc);
     
-    //TODO: does not converge possibly because of precision
+    //TODO: investigate possible precision issue here
     let last_frame = textureLoad(lastFrameTexture, vec2i(floor(coord_in.xy)), 0).rgb;
 	let blend_factor = 1.0 / (settings.sample + 1);
     let output = vec4(mix(last_frame, frame_result, blend_factor), 1.0);
