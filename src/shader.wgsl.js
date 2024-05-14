@@ -163,7 +163,7 @@ fn intersect_shadow(shadow_ray: Ray, max_distance: f32, target_object_index: i32
 	for (var object_index = 0; object_index < i32(settings.object_count); object_index++)
 	{
 		var hit = intersect_object(shadow_ray, object_index);
-        if (hit.object_index > 0 && hit.distance < max_distance && object_index != target_object_index) {
+        if (hit.object_index >= 0 && hit.distance < max_distance && object_index != target_object_index) {
 			return true;
         }
         //TODO: review. handle the case when the shadow ray hits another emissive object, in which case the light sample could come from there?
@@ -269,7 +269,7 @@ fn direct_light(hit: Hit, hit_position: vec3f) -> vec3f
 
     let cos_theta_light = max(0.0, dot(light_ray.dir, -normalize(direct_light_vector)));
     let cos_theta_hit = max(0.0, dot(normalize(direct_light_vector), hit.surface_normal));
-    var direct_contribution = cos_theta_hit * cos_theta_light * scene_materials[i32(light_source.material_index)].emission; //does the emissive object color matter here?
+    var direct_contribution = cos_theta_hit * cos_theta_light * scene_materials[i32(light_source.material_index)].emission;
 
     //falloff
     direct_contribution *= 1.0 / (1.0 + length(direct_light_vector)*length(direct_light_vector));
@@ -288,7 +288,29 @@ fn trace_path(cam_ray: Ray) -> vec3f
     var ray = cam_ray;
 	while (bounce < max_bounces)
 	{
+		var hit = intersect_scene(ray);
 
+        if(hit.object_index == -1)
+        {//no object hit, sky
+            var sky = sky_emission(ray.dir);
+			result += throughput * sky;
+            return result;
+        }
+
+        let hit_object = scene_objects[hit.object_index];
+        let hit_material = scene_materials[i32(hit_object.material_index)];
+
+        result += throughput * hit_material.emission;
+
+        //TODO: calculate reflectance from material
+        let reflectance = hit_material.albedo;
+        throughput *= reflectance;
+        
+        //direct light sampling
+        if(cam_ray.dir.x<0.1){
+		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+        }
+        
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
 		{
@@ -303,35 +325,6 @@ fn trace_path(cam_ray: Ray) -> vec3f
 				break;
 			}
 		}
-
-
-		var hit = intersect_scene(ray);
-
-        if(hit.object_index == -1)
-        {//no object hit, sky
-            var sky = sky_emission(ray.dir);
-            // if(bounce == 0)
-            // {//first hit sky
-            //     sky /= sky_strength;
-            // }
-			result += throughput * sky;
-            return result;
-        }
-
-        let hit_object = scene_objects[hit.object_index];
-        let hit_material = scene_materials[i32(hit_object.material_index)];
-
-
-        //direct light sampling
-        //if(cam_ray.dir.x<0.0){
-		    //result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
-        //}
-
-        result += throughput * hit_material.emission;
-
-        //TODO: calculate reflectance from material
-        let reflectance = hit_material.albedo;
-        throughput *= reflectance;
         
         //ray,weight = brdf.scatter ray hit
 
@@ -408,7 +401,7 @@ fn lowbias32(x_in: u32) -> u32
 
 @fragment
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> FragmentStageOutput {
-    let bigprime: u32 = 1717885903;
+    let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.sample);
     //calculate ray
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0);
