@@ -157,6 +157,11 @@ const sceneMaterialsBuffer = device.createBuffer({
   size: 4 * 4 * 4 * sceneMaterials.length,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
 });
+const histogramBuffer = device.createBuffer({
+  label: "histogramBuffer",
+  size: 4 * 4 * sceneSettings.width * sceneSettings.height,
+  usage: GPUBufferUsage.STORAGE,
+});
 //TODO: consider using a single buffer
 
 //setup shader
@@ -181,33 +186,13 @@ const renderPipeline = device.createRenderPipeline({
       {
         format: canvasFormat,
       },
-      {
-        format: canvasFormat,
-      },
     ],
   },
 });
 
-const lastFrameTexturePingView = device
-  .createTexture({
-    label: "lastFrameTexturePing",
-    size: [sceneSettings.width, sceneSettings.height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    format: canvasFormat,
-  })
-  .createView();
-const lastFrameTexturePongView = device
-  .createTexture({
-    label: "lastFrameTexturePong",
-    size: [sceneSettings.width, sceneSettings.height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    format: canvasFormat,
-  })
-  .createView();
-
-//bind uniform buffers to pipeline locations using bindgroup
-const myBindGroup = device.createBindGroup({
-  label: "Renderer bind group",
+//bind uniform/storage buffers to pipeline locations using bindgroups
+const sceneDataBindGroup = device.createBindGroup({
+  label: "sceneDataBindGroup",
   layout: renderPipeline.getBindGroupLayout(0),
   entries: [
     {
@@ -224,50 +209,29 @@ const myBindGroup = device.createBindGroup({
     },
   ],
 });
-const pingBindGroup = device.createBindGroup({
-  label: "ping bind group",
+const renderDataBindGroup = device.createBindGroup({
+  label: "renderDataBindGroup",
   layout: renderPipeline.getBindGroupLayout(1),
   entries: [
     {
       binding: 0,
-      resource: lastFrameTexturePingView,
-    },
-  ],
-});
-const pongBindGroup = device.createBindGroup({
-  label: "pong bind group",
-  layout: renderPipeline.getBindGroupLayout(1),
-  entries: [
-    {
-      binding: 0,
-      resource: lastFrameTexturePongView,
+      resource: { buffer: histogramBuffer },
     },
   ],
 });
 
 //create render bundle encoder to pre-record reusable commands
 const renderBundleEncoder = device.createRenderBundleEncoder({
-  colorFormats: [canvasFormat, canvasFormat],
+  colorFormats: [canvasFormat],
 });
-//record ping pass
 recordRenderPass1(renderBundleEncoder, true);
-//create the render bundle
-const renderBundlePing = renderBundleEncoder.finish();
+const renderBundle = renderBundleEncoder.finish();
 
-//create render bundle encoder to pre-record reusable commands
-const renderBundleEncoder2 = device.createRenderBundleEncoder({
-  colorFormats: [canvasFormat, canvasFormat],
-});
-//record pong pass
-recordRenderPass1(renderBundleEncoder2, false);
-//create the render bundle
-const renderBundlePong = renderBundleEncoder2.finish();
-
-async function recordRenderPass1(passEncoder, pingpong) {
+async function recordRenderPass1(passEncoder) {
   passEncoder.setPipeline(renderPipeline);
   passEncoder.setVertexBuffer(0, vertexBuffer);
-  passEncoder.setBindGroup(0, myBindGroup); //bind myBindGroup to group 0 slot, so this pass uses it
-  passEncoder.setBindGroup(1, pingpong ? pingBindGroup : pongBindGroup);
+  passEncoder.setBindGroup(0, sceneDataBindGroup); //bind sceneDataBindGroup to group 0 slot, so this pass uses it
+  passEncoder.setBindGroup(1, renderDataBindGroup);
   passEncoder.draw(vertices.length / 2); // 6 vertices
 }
 
@@ -305,7 +269,6 @@ async function renderFrame() {
       ).length, //emissive_object_count
     ])
   );
-
   device.queue.writeBuffer(
     sceneObjectsBuffer,
     0,
@@ -346,20 +309,9 @@ async function renderFrame() {
         clearValue: { r: 0, g: 0, b: 0.2, a: 1 }, // set color of clear op
         storeOp: "store", //save into texture at the end of the pass
       },
-      {
-        view:
-          sceneSettings.sample % 2 == 0
-            ? lastFrameTexturePongView
-            : lastFrameTexturePingView,
-        loadOp: "clear",
-        clearValue: { r: 0, g: 0, b: 0.2, a: 1 },
-        storeOp: "store",
-      },
     ],
   });
-  passEncoder.executeBundles([
-    sceneSettings.sample % 2 == 0 ? renderBundlePing : renderBundlePong,
-  ]);
+  passEncoder.executeBundles([renderBundle]);
   passEncoder.end();
   //create the command buffer
   const commandBuffer = commandEncoder.finish();

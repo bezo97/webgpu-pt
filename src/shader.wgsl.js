@@ -51,12 +51,6 @@ struct SceneSettings {
     emissive_object_count: f32,//i32
 };
 
-
-struct FragmentStageOutput {
-    @location(0) screen: vec4f,
-    @location(1) lastFrame: vec4f,
-}
-
 //TODO: consider constant memory buffer?
 
 @group(0) @binding(0) var<uniform> settings: SceneSettings;
@@ -65,7 +59,7 @@ struct FragmentStageOutput {
 
 @group(0) @binding(2) var<storage, read> scene_materials: array<SceneMaterial>;
 
-@group(1) @binding(0) var lastFrameTexture: texture_2d<f32>;
+@group(1) @binding(0) var<storage, read_write> histogram: array<vec4f>;
 
 //TODO: remove and pass as argument
 var<private> seed: u32 = 12345;
@@ -307,9 +301,9 @@ fn trace_path(cam_ray: Ray) -> vec3f
         throughput *= reflectance;
         
         //direct light sampling
-        if(cam_ray.dir.x<0.1){
-		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
-        }
+        //if(cam_ray.dir.x < 0.0){
+		    //result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+        //}
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
@@ -327,7 +321,6 @@ fn trace_path(cam_ray: Ray) -> vec3f
 		}
         
         //ray,weight = brdf.scatter ray hit
-
         ray = get_brdf_ray(ray, hit);
         bounce++;
     }
@@ -400,33 +393,37 @@ fn lowbias32(x_in: u32) -> u32
 }
 
 @fragment
-fn fragmentMain(@builtin(position) coord_in: vec4f) -> FragmentStageOutput {
+fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.sample);
-    //calculate ray
+    //TODO: these could be uniforms
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0);
     let tlc = settings.cam.forward*fov + settings.cam.up*(settings.height/2) - settings.cam.right*(settings.width/2);
     
-    var acc = vec3f(0.0);
-    let samples = 256;//TODO: make adaptive to target framerate
-    for (var i = 0; i < samples; i++)
+    var frame_acc = vec3f(0.0);
+    let frame_accumulation_steps = 128;//TODO: make adaptive to target framerate
+    for (var i = 0; i < frame_accumulation_steps; i++)
     {
-        let samples = pcg_hash_2f(&seed);
-        let aa_offset = vec2f(tent(samples.x)+0.5, tent(samples.y)+0.5);
+        let aa_samples = pcg_hash_2f(&seed);
+        let aa_offset = vec2f(tent(aa_samples.x)+0.5, tent(aa_samples.y)+0.5);
 
         let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
         let ray = Ray(settings.cam.position, raydir);
 
-        acc += trace_path(ray);
+        frame_acc += trace_path(ray);
     }
-    acc /= f32(samples);
 
-    var frame_result = tonemap(acc);
-    
-    //TODO: investigate possible precision issue here
-    let last_frame = textureLoad(lastFrameTexture, vec2i(floor(coord_in.xy)), 0).rgb;
-	let blend_factor = 1.0 / (settings.sample + 1);
-    let output = vec4(mix(last_frame, frame_result, blend_factor), 1.0);
-    return FragmentStageOutput(output, output);
+    //add accumulated samples to histogram
+    var histogram_value = vec3f(0.0);
+    if(settings.sample > 0){
+        histogram_value = histogram[i32(coord_in.x+coord_in.y*settings.width)].rgb;
+    }
+    let accumulated = histogram_value + frame_acc;
+    histogram[i32(coord_in.x+coord_in.y*settings.width)] = vec4f(accumulated, 0.0);
+
+    //display tonemapped image
+    let total_accumulation_steps = (1 + settings.sample)*f32(frame_accumulation_steps);
+    let display_frag = vec4(tonemap(accumulated.rgb/total_accumulation_steps), 1.0);
+    return display_frag;
 }
 `;
