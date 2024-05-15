@@ -44,9 +44,10 @@ struct SceneSettings {
     cam: Camera,
     sky_color: vec3f,
     time: f32,
-    sample: f32,//i32
     width: f32,
     height: f32,
+    total_accumulation_steps: f32,//i32
+    workload_accumulation_steps: f32,//i32
     object_count: f32,//i32
     emissive_object_count: f32,//i32
 };
@@ -392,14 +393,13 @@ fn tent(x_in: f32) -> f32 {
 @fragment
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
-    seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.sample);
+    seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.total_accumulation_steps);
     //TODO: these could be uniforms
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0);
     let tlc = settings.cam.forward*fov + settings.cam.up*(settings.height/2) - settings.cam.right*(settings.width/2);
     
     var frame_acc = vec3f(0.0);
-    let frame_accumulation_steps = 128;//TODO: make adaptive to target framerate
-    for (var i = 0; i < frame_accumulation_steps; i++)
+    for (var i = 0; i < i32(settings.workload_accumulation_steps); i++)
     {
         let aa_samples = f_hash2(&seed);
         let aa_offset = vec2f(tent(aa_samples.x)+0.5, tent(aa_samples.y)+0.5);
@@ -412,15 +412,15 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
 
     //add accumulated samples to histogram
     var histogram_value = vec3f(0.0);
-    if(settings.sample > 0){
+    if(settings.total_accumulation_steps > 0){
         histogram_value = histogram[i32(coord_in.x+coord_in.y*settings.width)].rgb;
     }
     let accumulated = histogram_value + frame_acc;
     histogram[i32(coord_in.x+coord_in.y*settings.width)] = vec4f(accumulated, 0.0);
 
     //display tonemapped image
-    let total_accumulation_steps = (1 + settings.sample)*f32(frame_accumulation_steps);
-    let display_frag = vec4(tonemap(accumulated.rgb/total_accumulation_steps), 1.0);
+    let norm = settings.total_accumulation_steps + settings.workload_accumulation_steps;
+    let display_frag = vec4(tonemap(accumulated.rgb/norm), 1.0);
     return display_frag;
 }
 `;

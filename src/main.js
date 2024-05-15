@@ -2,6 +2,7 @@ import shaderSource from "./shader.wgsl.js";
 
 const startTime = new Date().getTime() / 1000;
 let frameCounter = 0;
+const targetFramerate = 60; //fps
 const sceneSettings = {
   cam: {
     position: [0.0, 1.0, -10.0],
@@ -12,9 +13,10 @@ const sceneSettings = {
   },
   sky_color: [0.6, 0.7, 0.8],
   time: 0.0,
-  sample: 0,
   width: 720,
   height: 720,
+  total_accumulation_steps: 0,
+  workload_accumulation_steps: 128,
 };
 const sceneObjects = [
   {
@@ -83,15 +85,32 @@ canvas.onmousemove = (event) => {
   if (event.buttons == 1) {
     const mouseX = event.offsetX / canvas.width;
     const mouseY = 1 - event.offsetY / canvas.height;
-    sceneSettings.sample = 0;
+    sceneSettings.total_accumulation_steps = 0;
     sceneObjects[1].position[0] = -3 + 6 * mouseX;
     sceneObjects[1].position[1] = 4 * mouseY;
   }
 };
 setInterval(() => {
-  //show fps in title
-  document.title = frameCounter + " fps";
-  frameCounter = 0;
+  //show performance in title
+  document.title =
+    frameCounter +
+    " fps, " +
+    Math.floor(sceneSettings.workload_accumulation_steps) +
+    " steps";
+  //adjust workload size
+  if (!document.hidden) {
+    //avoid adjusting the workload and measuring fps when the page is in background, since animation-frame is not invoked
+    if (frameCounter < targetFramerate)
+      sceneSettings.workload_accumulation_steps *=
+        frameCounter / targetFramerate;
+    else sceneSettings.workload_accumulation_steps *= 1.5;
+    sceneSettings.workload_accumulation_steps = Math.max(
+      1,
+      sceneSettings.workload_accumulation_steps
+    );
+    //reset counter for fps
+    frameCounter = 0;
+  }
 }, 1000);
 //get gpu device
 if (!navigator.gpu) throw new Error("WebGPU not supported on this browser.");
@@ -240,7 +259,6 @@ async function recordRenderPass1(passEncoder) {
 async function renderFrame() {
   //update state
   sceneSettings.time = startTime - new Date().getTime() / 1000;
-
   //wait for previous frame finish
   await device.queue.onSubmittedWorkDone();
   frameCounter++;
@@ -260,9 +278,10 @@ async function renderFrame() {
       sceneSettings.cam.fov_angle,
       ...sceneSettings.sky_color,
       sceneSettings.time,
-      sceneSettings.sample,
       sceneSettings.width,
       sceneSettings.height,
+      sceneSettings.total_accumulation_steps,
+      sceneSettings.workload_accumulation_steps,
       sceneObjects.length, //object_count
       sceneObjects.filter((o) =>
         sceneMaterials[o.material_index].emission.some((e) => e > 0.0)
@@ -318,8 +337,9 @@ async function renderFrame() {
   //submit command buffer to queue
   device.queue.submit([commandBuffer]);
 
+  sceneSettings.total_accumulation_steps +=
+    sceneSettings.workload_accumulation_steps;
   //next frame
-  sceneSettings.sample++;
   requestAnimationFrame(renderFrame);
 }
 
