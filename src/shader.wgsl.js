@@ -64,22 +64,32 @@ struct SceneSettings {
 //TODO: remove and pass as argument
 var<private> seed: u32 = 12345;
 
-//pcg hash implementation is wgsl
-//https://github.com/bevyengine/bevy/pull/11956/
-fn pcg_hash_f(state: ptr<private, u32>) -> f32 {
-    *state = *state * 747796405u + 2891336453u;
-    let word = ((*state >> ((*state >> 28u) + 4u)) ^ *state) * 277803737u;
-    return f32((word >> 22u) ^ word) * bitcast<f32>(0x2f800004u);
+// Hash function for 32 bit uint
+// Found here: https://nullprogram.com/blog/2018/07/31/
+fn lowbias32(x_in: u32) -> u32
+{
+    var x = x_in;
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
 }
-fn pcg_hash_2f(state: ptr<private, u32>) -> vec2<f32> {
-    return vec2(pcg_hash_f(state), pcg_hash_f(state));
+
+fn f_hash(seed: ptr<private, u32>) -> f32 {
+    *seed = lowbias32(*seed);
+    return f32(*seed) / f32(0xffffffffu);
 }
-fn pcg_hash_3f(state: ptr<private, u32>) -> vec3<f32> {
-    return vec3(pcg_hash_f(state), pcg_hash_f(state), pcg_hash_f(state));
+fn f_hash2(seed: ptr<private, u32>) -> vec2f {
+    return vec2f(f_hash(seed), f_hash(seed));
+}
+fn f_hash3(seed: ptr<private, u32>) -> vec3f {
+    return vec3f(f_hash(seed), f_hash(seed), f_hash(seed));
 }
 
 fn cosWeightedRandomHemisphereDirection(n: vec3f) -> vec3f {
-    let r = pcg_hash_2f(&seed);
+    let r = f_hash2(&seed);
     let uu = normalize(cross(n, vec3(0.0,1.0,1.0)));
     let vv = cross(uu, n);
     let ra = sqrt(r.y);
@@ -226,7 +236,7 @@ fn sample_light_ray(emissive_object: SceneObject, preferred_direction: vec3f) ->
 //returns the index of the picked object
 fn sample_emissive_object() -> i32
 {
-    var target_index = i32(settings.emissive_object_count * pcg_hash_f(&seed));
+    var target_index = i32(settings.emissive_object_count * f_hash(&seed));
     for (var i = 0; i < i32(settings.object_count); i++)
     {
         if (length(scene_materials[i32(scene_objects[i].material_index)].emission) > 0.0) {
@@ -309,7 +319,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
 		{
             let p_survive = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.0, 1.0);
-			let roulette = pcg_hash_f(&seed);
+			let roulette = f_hash(&seed);
 			if (roulette < p_survive)
 			{//alive
 				throughput *= 1.0/p_survive;//TODO: check paper
@@ -379,19 +389,6 @@ fn tent(x_in: f32) -> f32 {
     return x / sqrt(abs(x)) - sign(x);
 }
 
-// Hash function for 32 bit uint
-// Found here: https://nullprogram.com/blog/2018/07/31/
-fn lowbias32(x_in: u32) -> u32
-{
-    var x = x_in;
-    x ^= x >> 16;
-    x *= 0x7feb352du;
-    x ^= x >> 15;
-    x *= 0x846ca68bu;
-    x ^= x >> 16;
-    return x;
-}
-
 @fragment
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
@@ -404,7 +401,7 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let frame_accumulation_steps = 128;//TODO: make adaptive to target framerate
     for (var i = 0; i < frame_accumulation_steps; i++)
     {
-        let aa_samples = pcg_hash_2f(&seed);
+        let aa_samples = f_hash2(&seed);
         let aa_offset = vec2f(tent(aa_samples.x)+0.5, tent(aa_samples.y)+0.5);
 
         let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
