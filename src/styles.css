@@ -1,3 +1,16 @@
-#main_display_container {
-  text-align: center;
+main {
+  display: flex;
+  justify-content: center;
+}
+
+aside {
+  margin: 0 8px;
+}
+
+form {
+  border: 1px solid black;
+
+  > * {
+    margin: 8px;
+  }
 }
