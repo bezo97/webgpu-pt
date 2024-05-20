@@ -61,48 +61,32 @@ export default function createGUI(containerElement, renderer) {
     })
     .on("click", () => {});
 
-  let selectedObject = renderer.scene.objects[0];
-
-  objectsPane
-    .addBlade({
-      view: "list",
-      label: "objects",
-      options: renderer.scene.objects.map((v, i) => {
-        return {
-          text: `${i}`,
-          value: i,
-        };
-      }),
-      value: 0,
-    })
-    .on("change", (i) => {
-      selectedObject = renderer.scene.objects[i];
+  for (const obj of renderer.scene.objects) {
+    const objectEditorPane = objectsPane.addFolder({
+      title: "object",
+      expanded: false,
     });
 
-  const objectEditorPane = objectsPane.addFolder({
-    title: "Edit Selection",
-    expanded: true,
-  });
+    objectEditorPane.addBinding(obj, "position", {
+      picker: "inline",
+      expanded: true,
+      x: { min: -10, max: 10 },
+      y: { min: -10, max: 10 },
+      z: { min: -10, max: 10 },
+    });
 
-  objectEditorPane.addBinding(selectedObject, "position", {
-    picker: "inline",
-    expanded: true,
-    x: { min: -10, max: 10 },
-    y: { min: -10, max: 10 },
-    z: { min: -10, max: 10 },
-  });
+    objectEditorPane.addBinding(obj, "scale", {
+      min: 0,
+      max: 5,
+    });
 
-  objectEditorPane.addBinding(selectedObject, "scale", {
-    min: 0,
-    max: 5,
-  });
-
-  const deleteObjectButton = objectEditorPane
-    .addButton({
-      title: "🗑",
-      label: "Delete object",
-    })
-    .on("click", () => {});
+    const deleteObjectButton = objectEditorPane
+      .addButton({
+        title: "🗑",
+        label: "Delete object",
+      })
+      .on("click", () => {});
+  }
 
   const addMaterialButton = materialsPane
     .addButton({
@@ -111,41 +95,25 @@ export default function createGUI(containerElement, renderer) {
     })
     .on("click", () => {});
 
-  let selectedMaterial = renderer.scene.materials[0];
-
-  materialsPane
-    .addBlade({
-      view: "list",
-      label: "materials",
-      options: renderer.scene.materials.map((v, i) => {
-        return {
-          text: v.name,
-          value: i,
-        };
-      }),
-      value: 0,
-    })
-    .on("change", (i) => {
-      selectedMaterial = renderer.scene.materials[i];
+  for (const mat of renderer.scene.materials) {
+    const materialEditorPane = materialsPane.addFolder({
+      title: mat.name,
+      expanded: false,
     });
 
-  const materialEditorPane = materialsPane.addFolder({
-    title: "Edit Selection",
-    expanded: true,
-  });
+    materialEditorPane.addBinding(mat, "material_type", {
+      options: {
+        diffuse: 0,
+        reflective: 1,
+        refractive: 2,
+      },
+    });
 
-  materialEditorPane.addBinding(selectedMaterial, "material_type", {
-    options: {
-      diffuse: 0,
-      reflective: 1,
-      refractive: 2,
-    },
-  });
-
-  materialEditorPane.addBinding(selectedMaterial, "albedo", {
-    view: "color",
-    picker: "inline",
-    expanded: true,
-    color: { type: "float", alpha: false },
-  });
+    materialEditorPane.addBinding(mat, "albedo", {
+      view: "color",
+      picker: "inline",
+      expanded: true,
+      color: { type: "float", alpha: false },
+    });
+  }
 }
