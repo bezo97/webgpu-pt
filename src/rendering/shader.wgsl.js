@@ -131,7 +131,7 @@ fn de_mandelbox(p: vec3f, steps: i32, scale: f32) -> f32
 
 fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32 {
     //transform by object's translation/scale
-    var pos_tf = pos/de_object.scale;
+    var pos_tf = (pos - de_object.position)/de_object.scale;
     
     var iterations = 10;
     if(fast_eval){
@@ -166,24 +166,24 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     var is_surface_hit = false;
     for(var i = 0; i < max_marching_steps; i++)
     {
-        let pos = ray.pos + ray.dir * total_distance - fractal_object.position;
-        var step_estimate = estimate_distance(pos, fractal_object, fast_eval);
+        let pos = ray.pos + ray.dir * total_distance;
+        var raystep_estimate = estimate_distance(pos, fractal_object, fast_eval);
 
         var raystep_multiplier = 0.9;//aka. fuzzy factor
         if(fast_eval) {
             raystep_multiplier = 1.0;
         }
-        total_distance += step_estimate * 1.0;
+        total_distance += raystep_estimate * raystep_multiplier;
 
         if(total_distance > bounding_sphere_t1t2.y) {
             return no_hit;//ray intersected the bounding sphere but not the fractal
         }
 
-        var surface_eps = 0.0001;
+        var surface_eps = 0.00001;
         if(fast_eval) {
             surface_eps = 0.01;
         }
-        if(step_estimate < surface_eps)
+        if(raystep_estimate < surface_eps)
         {
             is_surface_hit = true;
             break;
@@ -194,7 +194,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
-    let p = ray.pos + ray.dir * total_distance - fractal_object.position;
+    let p = ray.pos + ray.dir * total_distance;
     let n_eps = 1000.0*EPS;
     var surface_normal: vec3f;
     if(fast_eval) {
