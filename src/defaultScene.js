@@ -14,15 +14,15 @@ const settings = {
 
 const objects = [
   {
-    object_type: 0,
+    object_type: 1,
     material_index: 0,
-    position: { x: 0.0, y: 1.0, z: 0.0 },
-    scale: 1.0,
+    position: { x: 0.0, y: 0.0, z: 0.0 },
+    scale: 3.75,
   },
   {
     object_type: 0,
     material_index: 1,
-    position: { x: 1.5, y: 0.5, z: -0.5 },
+    position: { x: 2.5, y: 1.0, z: -0.5 },
     scale: 0.25,
   },
   {
@@ -39,7 +39,7 @@ const objects = [
   },
   {
     object_type: 0,
-    material_index: 0,
+    material_index: 4,
     position: { x: 0.0, y: -9999.0, z: 0.0 },
     scale: 9999,
   },
@@ -47,28 +47,39 @@ const objects = [
 
 const materials = [
   {
+    name: "Red diffuse",
     material_type: 0,
     albedo: { r: 0.95, g: 0.5, b: 0.5 },
     ior: 0,
     emission: [0.0, 0.0, 0.0],
   },
   {
+    name: "White emitter",
     material_type: 0,
     albedo: { r: 1.0, g: 1.0, b: 1.0 },
     ior: 0,
     emission: [40, 40, 40],
   },
   {
+    name: "Simple glass",
     material_type: 2,
     albedo: { r: 0.6, g: 0.6, b: 0.6 },
     ior: 1.5,
     emission: [0, 0, 0],
   },
   {
+    name: "Green mirror",
     material_type: 1,
     albedo: { r: 0.2, g: 0.8, b: 0.8 },
     ior: 0.0,
     emission: [0, 0, 0],
+  },
+  {
+    name: "Yellow diffuse",
+    material_type: 0,
+    albedo: { r: 0.85, g: 0.95, b: 0.5 },
+    ior: 0,
+    emission: [0.0, 0.0, 0.0],
   },
 ];
 

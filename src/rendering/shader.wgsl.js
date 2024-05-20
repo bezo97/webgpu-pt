@@ -101,22 +101,106 @@ fn cosWeightedRandomHemisphereDirection(n: vec3f) -> vec3f {
     return normalize( rr );
 }
 
+fn sphere_t1t2(ray: Ray, radius: f32, position: vec3f) -> vec2f
+{
+    let offset = position - ray.pos;
+    let b = dot(offset, ray.dir);
+    if(b < 0.0) {
+        return vec2f(0.0);
+    }
+    let c = dot(offset, offset) - b*b;
+    if(c > radius*radius){
+        return vec2f(0.0);
+    }
+    let thc = sqrt(radius*radius - c);
+    let t1 = b - thc;
+    let t2 = b + thc;
+    return vec2f(t1, t2);
+}
+
+fn de_mandelbox(p: vec3f, steps: i32, scale: f32) -> f32
+{//based on: https://www.shadertoy.com/view/MtXXDl
+    let q0 = vec4f(p*10.0, 1.0);
+    var q = q0;
+    for (var n = 0; n < steps; n++) {
+        q = vec4f(clamp(q.xyz, vec3f(-1.0), vec3f(1.0)) * 2.0 - q.xyz, q.w);
+        q = q * scale / clamp(dot(q.xyz, q.xyz), 0.5, 1.) + q0;
+    }
+    return length(q.xyz) / abs(q.w)/10.0;
+}
+
+fn estimate_distance(pos: vec3f, de_object: SceneObject) -> f32 {
+    //transform by object's translation/scale
+    var pos_tf = pos/de_object.scale;
+
+    let de = de_mandelbox(pos_tf, 10, 2.62);
+    //let de = length(pos) - 1.0;
+
+    //tranform back
+    return de*de_object.scale;
+}
+
+fn intersect_fractal(ray: Ray, object_index: i32) -> Hit
+{
+    let fractal_object = scene_objects[object_index];
+    //first check if ray intersects bounding sphere
+    let bounding_sphere_t1t2 = sphere_t1t2(ray, fractal_object.scale, fractal_object.position);
+    if(length(bounding_sphere_t1t2) == 0.0) {
+        return no_hit;
+    }
+
+    var total_distance = 0.0;
+    //start estimation on bounds if we're outside the bounds
+    if(bounding_sphere_t1t2.x > 0.0) {
+        total_distance = bounding_sphere_t1t2.x;
+    }
+
+    let max_marching_steps = 500;//
+    var is_surface_hit = false;
+    for(var i = 0; i < max_marching_steps; i++)
+    {
+        let pos = ray.pos + ray.dir * total_distance - fractal_object.position;
+        var step_estimate = estimate_distance(pos, fractal_object);
+        total_distance += step_estimate * 1.0;//fuzzy factor, aka. raystep multiplier
+
+        if(total_distance > bounding_sphere_t1t2.y) {
+            return no_hit;//ray intersected the bounding sphere but not the fractal
+        }
+        if(step_estimate < 0.0001)
+        {
+            is_surface_hit = true;
+            break;
+        }
+    }
+
+    if(!is_surface_hit) {
+        return no_hit;
+    }
+
+    let p = ray.pos + ray.dir * total_distance - fractal_object.position;
+    let n_eps = 1000.0*EPS;
+    let surface_normal = normalize(vec3f(
+        estimate_distance(vec3f(p.x + n_eps, p.y, p.z), fractal_object) - estimate_distance(vec3f(p.x - n_eps, p.y, p.z), fractal_object),
+        estimate_distance(vec3f(p.x, p.y + n_eps, p.z), fractal_object) - estimate_distance(vec3f(p.x, p.y - n_eps, p.z), fractal_object),
+        estimate_distance(vec3f(p.x, p.y, p.z + n_eps), fractal_object) - estimate_distance(vec3f(p.x, p.y, p.z - n_eps), fractal_object)));
+
+    return Hit(
+        object_index,
+        total_distance,
+        surface_normal
+    );
+}
+
 fn intersect_sphere(ray: Ray, object_index: i32) -> Hit
 {
     let sphere = scene_objects[object_index];
 
-    let offset = sphere.position - ray.pos;
-    let b = dot(offset, ray.dir);
-    if(b < 0.0) {
+    let t1t2 = sphere_t1t2(ray, sphere.scale, sphere.position);
+    if(length(t1t2) == 0.0) {
         return no_hit;
     }
-    let c = dot(offset, offset) - b*b;
-    if(c > sphere.scale*sphere.scale){
-        return no_hit;
-    }
-    let thc = sqrt(sphere.scale*sphere.scale - c);
-    let t1 = b - thc;
-    let t2 = b + thc;
+    let t1 = t1t2.x;
+    let t2 = t1t2.y;
 
     var t = 0.0;
     //avoid self-intersection with small epsilon
@@ -141,6 +225,9 @@ fn intersect_object(ray: Ray, object_index: i32) -> Hit {
     {
         case 0: {
             return intersect_sphere(ray, object_index);
+        }
+        case 1: {
+            return intersect_fractal(ray, object_index);
         }
         case default: {
             return no_hit;
@@ -312,9 +399,9 @@ fn trace_path(cam_ray: Ray) -> vec3f
         throughput *= reflectance;
         
         //direct light sampling
-        //if(cam_ray.dir.x < 0.0){
-		    //result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
-        //}
+        if(/*cam_ray.dir.x < 0.0 && */hit_material.material_type == 0){
+		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+        }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)

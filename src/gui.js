@@ -119,7 +119,7 @@ export default function createGUI(containerElement, renderer) {
       label: "materials",
       options: renderer.scene.materials.map((v, i) => {
         return {
-          text: `${i}`,
+          text: v.name,
           value: i,
         };
       }),
