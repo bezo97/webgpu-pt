@@ -207,7 +207,11 @@ export class Renderer {
       this.#settingsBuffer,
       0,
       new Float32Array([
-        ...scene.settings.cam.position,
+        ...[
+          scene.settings.cam.position.x,
+          scene.settings.cam.position.y,
+          scene.settings.cam.position.z,
+        ],
         0.0,
         ...scene.settings.cam.right,
         0.0,
@@ -236,7 +240,7 @@ export class Renderer {
           o.material_index,
           0.0,
           0.0,
-          ...o.position,
+          ...[o.position.x, o.position.y, o.position.z],
           o.scale,
         ])
       )
@@ -250,7 +254,7 @@ export class Renderer {
           0.0,
           0.0,
           0.0,
-          ...m.albedo,
+          ...[m.albedo.r, m.albedo.g, m.albedo.b],
           m.ior,
           ...m.emission,
           0.0,
