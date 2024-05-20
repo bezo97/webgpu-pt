@@ -129,18 +129,22 @@ fn de_mandelbox(p: vec3f, steps: i32, scale: f32) -> f32
     return length(q.xyz) / abs(q.w)/10.0;
 }
 
-fn estimate_distance(pos: vec3f, de_object: SceneObject) -> f32 {
+fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32 {
     //transform by object's translation/scale
     var pos_tf = pos/de_object.scale;
+    
+    var iterations = 10;
+    if(fast_eval){
+        iterations = 5;
+    }
 
-    let de = de_mandelbox(pos_tf, 10, 2.62);
-    //let de = length(pos) - 1.0;
+    let de = de_mandelbox(pos_tf, iterations, 2.62);
 
     //tranform back
     return de*de_object.scale;
 }
 
-fn intersect_fractal(ray: Ray, object_index: i32) -> Hit
+fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
 {
     let fractal_object = scene_objects[object_index];
     //first check if ray intersects bounding sphere
@@ -155,18 +159,31 @@ fn intersect_fractal(ray: Ray, object_index: i32) -> Hit
         total_distance = bounding_sphere_t1t2.x;
     }
 
-    let max_marching_steps = 500;//
+    var max_marching_steps = 500;
+    if(fast_eval) {
+        max_marching_steps = 100;
+    }
     var is_surface_hit = false;
     for(var i = 0; i < max_marching_steps; i++)
     {
         let pos = ray.pos + ray.dir * total_distance - fractal_object.position;
-        var step_estimate = estimate_distance(pos, fractal_object);
-        total_distance += step_estimate * 1.0;//fuzzy factor, aka. raystep multiplier
+        var step_estimate = estimate_distance(pos, fractal_object, fast_eval);
+
+        var raystep_multiplier = 0.9;//aka. fuzzy factor
+        if(fast_eval) {
+            raystep_multiplier = 1.0;
+        }
+        total_distance += step_estimate * 1.0;
 
         if(total_distance > bounding_sphere_t1t2.y) {
             return no_hit;//ray intersected the bounding sphere but not the fractal
         }
-        if(step_estimate < 0.0001)
+
+        var surface_eps = 0.0001;
+        if(fast_eval) {
+            surface_eps = 0.01;
+        }
+        if(step_estimate < surface_eps)
         {
             is_surface_hit = true;
             break;
@@ -179,10 +196,18 @@ fn intersect_fractal(ray: Ray, object_index: i32) -> Hit
 
     let p = ray.pos + ray.dir * total_distance - fractal_object.position;
     let n_eps = 1000.0*EPS;
-    let surface_normal = normalize(vec3f(
-        estimate_distance(vec3f(p.x + n_eps, p.y, p.z), fractal_object) - estimate_distance(vec3f(p.x - n_eps, p.y, p.z), fractal_object),
-        estimate_distance(vec3f(p.x, p.y + n_eps, p.z), fractal_object) - estimate_distance(vec3f(p.x, p.y - n_eps, p.z), fractal_object),
-        estimate_distance(vec3f(p.x, p.y, p.z + n_eps), fractal_object) - estimate_distance(vec3f(p.x, p.y, p.z - n_eps), fractal_object)));
+    var surface_normal: vec3f;
+    if(fast_eval) {
+        surface_normal = normalize(vec3f(
+            estimate_distance(vec3f(p.x + n_eps, p.y, p.z), fractal_object, fast_eval),
+            estimate_distance(vec3f(p.x, p.y + n_eps, p.z), fractal_object, fast_eval),
+            estimate_distance(vec3f(p.x, p.y, p.z + n_eps), fractal_object, fast_eval)) - p);
+    } else {
+        surface_normal = normalize(vec3f(
+            estimate_distance(vec3f(p.x + n_eps, p.y, p.z), fractal_object, fast_eval) - estimate_distance(vec3f(p.x - n_eps, p.y, p.z), fractal_object, fast_eval),
+            estimate_distance(vec3f(p.x, p.y + n_eps, p.z), fractal_object, fast_eval) - estimate_distance(vec3f(p.x, p.y - n_eps, p.z), fractal_object, fast_eval),
+            estimate_distance(vec3f(p.x, p.y, p.z + n_eps), fractal_object, fast_eval) - estimate_distance(vec3f(p.x, p.y, p.z - n_eps), fractal_object, fast_eval)));
+    }
 
     return Hit(
         object_index,
@@ -219,7 +244,7 @@ fn intersect_sphere(ray: Ray, object_index: i32) -> Hit
     );
 }
 
-fn intersect_object(ray: Ray, object_index: i32) -> Hit {
+fn intersect_object(ray: Ray, object_index: i32, fast_eval: bool) -> Hit {
     let object = scene_objects[object_index];
     switch(i32(object.object_type))
     {
@@ -227,7 +252,7 @@ fn intersect_object(ray: Ray, object_index: i32) -> Hit {
             return intersect_sphere(ray, object_index);
         }
         case 1: {
-            return intersect_fractal(ray, object_index);
+            return intersect_fractal(ray, object_index, fast_eval);
         }
         case default: {
             return no_hit;
@@ -235,13 +260,13 @@ fn intersect_object(ray: Ray, object_index: i32) -> Hit {
     }
 }
 
-fn intersect_scene(ray: Ray) -> Hit {
+fn intersect_scene(ray: Ray, fast_eval: bool) -> Hit {
 	var closest_hit = Hit();
 	closest_hit.object_index = -1;
 	closest_hit.distance = 9999999.0;//TODO: use infinity https://github.com/gpuweb/gpuweb/issues/3431
 	for (var object_index = 0; object_index < i32(settings.object_count); object_index++)
 	{
-		var hit = intersect_object(ray, object_index);
+		var hit = intersect_object(ray, object_index, fast_eval);
 		if (hit.object_index >= 0 && hit.distance < closest_hit.distance)
 		{
 			closest_hit = hit;
@@ -254,7 +279,7 @@ fn intersect_scene(ray: Ray) -> Hit {
 fn intersect_shadow(shadow_ray: Ray, max_distance: f32, target_object_index: i32) -> bool {
 	for (var object_index = 0; object_index < i32(settings.object_count); object_index++)
 	{
-		var hit = intersect_object(shadow_ray, object_index);
+		var hit = intersect_object(shadow_ray, object_index, false);
         if (hit.object_index >= 0 && hit.distance < max_distance && object_index != target_object_index) {
 			return true;
         }
@@ -380,7 +405,8 @@ fn trace_path(cam_ray: Ray) -> vec3f
     var ray = cam_ray;
 	while (bounce < max_bounces)
 	{
-		var hit = intersect_scene(ray);
+        let fast_eval = bounce > 1;
+		var hit = intersect_scene(ray, fast_eval);
 
         if(hit.object_index == -1)
         {//no object hit, sky
