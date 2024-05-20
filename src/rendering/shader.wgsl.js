@@ -288,7 +288,7 @@ fn intersect_shadow(shadow_ray: Ray, max_distance: f32, target_object_index: i32
     return false;
 }
 
-const sky_strength = 0.25;
+const sky_strength = 1.0;
 fn sky_emission(ray_dir: vec3f) -> vec3f {
     //TODO: single color for now
     return sky_strength * settings.sky_color;

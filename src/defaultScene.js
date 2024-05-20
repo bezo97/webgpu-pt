@@ -6,7 +6,7 @@ const settings = {
     forward: [0.0, 0.0, 1.0],
     fov_angle: 20.0,
   },
-  sky_color: [0.6, 0.7, 0.8],
+  sky_color: { r: 0.15, g: 0.17, b: 0.2 },
   time: 0.0,
   width: 720,
   height: 720,
@@ -47,39 +47,39 @@ const objects = [
 
 const materials = [
   {
-    name: "Red diffuse",
+    name: "Red_diffuse",
     material_type: 0,
     albedo: { r: 0.95, g: 0.5, b: 0.5 },
     ior: 0,
-    emission: [0.0, 0.0, 0.0],
+    emission: { r: 0.0, g: 0.0, b: 0.0 },
   },
   {
-    name: "White emitter",
+    name: "White_emitter",
     material_type: 0,
     albedo: { r: 1.0, g: 1.0, b: 1.0 },
     ior: 0,
-    emission: [40, 40, 40],
+    emission: { r: 40.0, g: 40.0, b: 40.0 },
   },
   {
-    name: "Simple glass",
+    name: "Simple_glass",
     material_type: 2,
     albedo: { r: 0.6, g: 0.6, b: 0.6 },
     ior: 1.5,
-    emission: [0, 0, 0],
+    emission: { r: 0.0, g: 0.0, b: 0.0 },
   },
   {
-    name: "Green mirror",
+    name: "Green_mirror",
     material_type: 1,
     albedo: { r: 0.2, g: 0.8, b: 0.8 },
     ior: 0.0,
-    emission: [0, 0, 0],
+    emission: { r: 0.0, g: 0.0, b: 0.0 },
   },
   {
-    name: "Yellow diffuse",
+    name: "Yellow_diffuse",
     material_type: 0,
     albedo: { r: 0.85, g: 0.95, b: 0.5 },
     ior: 0,
-    emission: [0.0, 0.0, 0.0],
+    emission: { r: 0.0, g: 0.0, b: 0.0 },
   },
 ];
 

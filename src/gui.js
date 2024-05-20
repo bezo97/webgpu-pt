@@ -45,6 +45,28 @@ export default function createGUI(containerElement, renderer) {
     view: "separator",
   });
 
+  const sceneSettingsPane = pane.addFolder({
+    title: "Scene",
+    expanded: true,
+  });
+  sceneSettingsPane.on("change", (a) => {
+    renderer.invalidateAccumulation();
+  });
+
+  sceneSettingsPane.addBinding(renderer.scene.settings, "sky_color", {
+    view: "color",
+    color: { type: "float", alpha: false },
+  });
+
+  const cameraPane = sceneSettingsPane.addFolder({
+    title: "Camera",
+    expanded: false,
+  });
+  cameraPane.addBinding(renderer.scene.settings.cam, "fov_angle", {
+    min: 1,
+    max: 60,
+  });
+
   const tab = pane.addTab({
     pages: [{ title: "Objects" }, { title: "Materials" }],
   });
@@ -61,10 +83,26 @@ export default function createGUI(containerElement, renderer) {
     })
     .on("click", () => {});
 
+  let material_options = {};
+  for (let i = 0; i < renderer.scene.materials.length; i++)
+    material_options[renderer.scene.materials[i].name] = i;
+
   for (const obj of renderer.scene.objects) {
     const objectEditorPane = objectsPane.addFolder({
       title: "object",
       expanded: false,
+    });
+
+    objectEditorPane.addBinding(obj, "object_type", {
+      options: {
+        sphere: 0,
+        fractal: 1,
+      },
+    });
+
+    objectEditorPane.addBinding(obj, "material_index", {
+      label: "Material",
+      options: material_options,
     });
 
     objectEditorPane.addBinding(obj, "position", {
@@ -110,6 +148,13 @@ export default function createGUI(containerElement, renderer) {
     });
 
     materialEditorPane.addBinding(mat, "albedo", {
+      view: "color",
+      picker: "inline",
+      expanded: true,
+      color: { type: "float", alpha: false },
+    });
+
+    materialEditorPane.addBinding(mat, "emission", {
       view: "color",
       picker: "inline",
       expanded: true,

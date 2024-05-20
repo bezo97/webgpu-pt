@@ -219,16 +219,21 @@ export class Renderer {
         0.0,
         ...scene.settings.cam.forward,
         scene.settings.cam.fov_angle,
-        ...scene.settings.sky_color,
+        ...[
+          scene.settings.sky_color.r,
+          scene.settings.sky_color.g,
+          scene.settings.sky_color.b,
+        ],
         scene.settings.time,
         scene.settings.width,
         scene.settings.height,
         this.total_accumulation_steps,
         this.workload_accumulation_steps,
         scene.objects.length, //object_count
-        scene.objects.filter((o) =>
-          scene.materials[o.material_index].emission.some((e) => e > 0.0)
-        ).length, //emissive_object_count
+        scene.objects.filter((o) => {
+          const e = scene.materials[o.material_index].emission;
+          return e.r + e.g + e.b > 0.0;
+        }).length, //emissive_object_count
       ])
     );
     this.#device.queue.writeBuffer(
@@ -256,7 +261,7 @@ export class Renderer {
           0.0,
           ...[m.albedo.r, m.albedo.g, m.albedo.b],
           m.ior,
-          ...m.emission,
+          ...[m.emission.r, m.emission.g, m.emission.b],
           0.0,
         ])
       )
