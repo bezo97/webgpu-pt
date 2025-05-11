@@ -29,8 +29,7 @@ export class Renderer {
     if (this.#renderBundle) throw new Error("Already initialized");
 
     //get gpu device
-    if (!navigator.gpu)
-      throw new Error("WebGPU not supported on this browser.");
+    if (!navigator.gpu) throw new Error("WebGPU not supported on this browser.");
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) throw new Error("No appropriate GPUAdapter found.");
     this.#device = await adapter.requestDevice();
@@ -181,13 +180,9 @@ export class Renderer {
         //avoid adjusting the workload and measuring fps when the page is in background, since animation-frame is not invoked
 
         const targetDelta = this.#frameCounter / this.targetFramerate;
-        if (this.#frameCounter < this.targetFramerate)
-          this.workload_accumulation_steps *= targetDelta;
+        if (this.#frameCounter < this.targetFramerate) this.workload_accumulation_steps *= targetDelta;
         else this.workload_accumulation_steps *= 1.2;
-        this.workload_accumulation_steps = Math.max(
-          1,
-          this.workload_accumulation_steps
-        );
+        this.workload_accumulation_steps = Math.max(1, this.workload_accumulation_steps);
         //reset counter for fps
         this.#frameCounter = 0;
       }
@@ -207,23 +202,15 @@ export class Renderer {
       this.#settingsBuffer,
       0,
       new Float32Array([
-        ...[
-          scene.settings.cam.position.x,
-          scene.settings.cam.position.y,
-          scene.settings.cam.position.z,
-        ],
+        ...[scene.settings.cam.position.x, scene.settings.cam.position.y, scene.settings.cam.position.z],
         0.0,
-        ...scene.settings.cam.right,
+        ...[scene.settings.cam.right.x, scene.settings.cam.right.y, scene.settings.cam.right.z],
         0.0,
-        ...scene.settings.cam.up,
+        ...[scene.settings.cam.up.x, scene.settings.cam.up.y, scene.settings.cam.up.z],
         0.0,
-        ...scene.settings.cam.forward,
+        ...[scene.settings.cam.forward.x, scene.settings.cam.forward.y, scene.settings.cam.forward.z],
         scene.settings.cam.fov_angle,
-        ...[
-          scene.settings.sky_color.r,
-          scene.settings.sky_color.g,
-          scene.settings.sky_color.b,
-        ],
+        ...[scene.settings.sky_color.r, scene.settings.sky_color.g, scene.settings.sky_color.b],
         scene.settings.time,
         scene.settings.width,
         scene.settings.height,
@@ -239,16 +226,7 @@ export class Renderer {
     this.#device.queue.writeBuffer(
       this.#objectsBuffer,
       0,
-      new Float32Array(
-        scene.objects.flatMap((o) => [
-          o.object_type,
-          o.material_index,
-          0.0,
-          0.0,
-          ...[o.position.x, o.position.y, o.position.z],
-          o.scale,
-        ])
-      )
+      new Float32Array(scene.objects.flatMap((o) => [o.object_type, o.material_index, 0.0, 0.0, ...[o.position.x, o.position.y, o.position.z], o.scale]))
     );
     this.#device.queue.writeBuffer(
       this.#materialsBuffer,

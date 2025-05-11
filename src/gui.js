@@ -55,6 +55,8 @@ export default function createGUI(containerElement, renderer) {
 
   sceneSettingsPane.addBinding(renderer.scene.settings, "sky_color", {
     view: "color",
+    picker: "inline",
+    expanded: false,
     color: { type: "float", alpha: false },
   });
 
@@ -84,8 +86,7 @@ export default function createGUI(containerElement, renderer) {
     .on("click", () => {});
 
   let material_options = {};
-  for (let i = 0; i < renderer.scene.materials.length; i++)
-    material_options[renderer.scene.materials[i].name] = i;
+  for (let i = 0; i < renderer.scene.materials.length; i++) material_options[renderer.scene.materials[i].name] = i;
 
   for (const obj of renderer.scene.objects) {
     const objectEditorPane = objectsPane.addFolder({

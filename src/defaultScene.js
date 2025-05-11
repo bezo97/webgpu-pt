@@ -1,9 +1,9 @@
 const settings = {
   cam: {
     position: { x: 0.0, y: 1.0, z: -10.0 },
-    right: [1.0, 0.0, 0.0],
-    up: [0.0, 1.0, 0.0],
-    forward: [0.0, 0.0, 1.0],
+    right: { x: 1.0, y: 0.0, z: 0.0 },
+    up: { x: 0.0, y: 1.0, z: 0.0 },
+    forward: { x: 0.0, y: 0.0, z: 1.0 },
     fov_angle: 20.0,
   },
   sky_color: { r: 0.15, g: 0.17, b: 0.2 },
