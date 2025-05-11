@@ -6,10 +6,7 @@ const EPS = 2e-5;
 const max_bounces = 6;
 const no_hit = Hit(-1, -1.0, vec3f(0.0));
 
-struct Ray {
-    pos: vec3f,
-    dir: vec3f,
-}
+//uniform structs:
 
 struct SceneMaterial {
     material_type: f32,//i32
@@ -24,13 +21,6 @@ struct SceneObject {
     position: vec3f,
     scale: f32,
 }
-
-struct Hit {
-    //-1 means no hit
-	object_index: i32,
-	distance: f32,
-	surface_normal: vec3f,//outer surface
-};
 
 struct Camera {
     position: vec3f,
@@ -51,6 +41,26 @@ struct SceneSettings {
     object_count: f32,//i32
     emissive_object_count: f32,//i32
 };
+
+//helper structs:
+
+struct Ray {
+    pos: vec3f,
+    dir: vec3f,
+}
+
+struct Hit {
+	object_index: i32,//-1 means no hit
+	distance: f32,
+	surface_normal: vec3f,//outer surface
+};
+
+struct BRDFSample {
+    scattered_ray: Ray,
+    reflectance : vec3f,
+    cos_theta: f32,
+    pdf: f32,
+}
 
 //TODO: consider constant memory buffer?
 
@@ -87,6 +97,10 @@ fn f_hash2(seed: ptr<private, u32>) -> vec2f {
 }
 fn f_hash3(seed: ptr<private, u32>) -> vec3f {
     return vec3f(f_hash(seed), f_hash(seed), f_hash(seed));
+}
+
+fn schlick_fresnel(cos_theta: f32, r0: vec3f) -> vec3f {
+    return r0 + (vec3f(1.0) - r0) * pow(1.0 - cos_theta, 5.0);
 }
 
 fn cosWeightedRandomHemisphereDirection(n: vec3f) -> vec3f {
@@ -294,7 +308,7 @@ fn sky_emission(ray_dir: vec3f) -> vec3f {
     return sky_strength * settings.sky_color;
 }
 
-fn get_brdf_ray(ray_in: Ray, hit: Hit) -> Ray {
+fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
     let hit_object = scene_objects[hit.object_index];
     let hit_material = scene_materials[i32(hit_object.material_index)];
     
@@ -308,28 +322,47 @@ fn get_brdf_ray(ray_in: Ray, hit: Hit) -> Ray {
         ior = 1.0/ior;
     }
 
+    let cos_theta_cam = max(0.0, dot(-ray_in.dir, normal));
     var hit_pos = ray_in.pos + ray_in.dir * hit.distance;
+    var brdf = BRDFSample();
 
-    //TODO: importance sample by fresnel weight
-    //fresnel weight = ..
-    //p_choice = fresnel weight
-    //return weight too
-    
-    switch(i32(hit_material.material_type)) {
+    switch(i32(hit_material.material_type)) { //fun fact: no fallthrough in wgsl, no need for break;
         case 0, default: { //diffuse
-            //weight:albedo
             hit_pos += normal * EPS;//move back a bit to avoid self-intersection problems
-            return Ray(hit_pos, cosWeightedRandomHemisphereDirection(normal));
+            let scatter_dir = cosWeightedRandomHemisphereDirection(normal);
+            brdf.scattered_ray = Ray(hit_pos, scatter_dir);
+            brdf.reflectance = hit_material.albedo/PI;
+            brdf.cos_theta = max(0.0, dot(scatter_dir, normal));
+            brdf.pdf = dot(scatter_dir, normal) / PI;//pdf for cosine weighted hemisphere
         }
         case 1: { //reflect
             hit_pos += normal * EPS;//move back a bit to avoid self-intersection problems
-            return Ray(hit_pos, reflect(ray_in.dir, normal));
+            let scatter_dir = reflect(ray_in.dir, normal);
+            brdf.scattered_ray = Ray(hit_pos, scatter_dir);
+            brdf.reflectance = schlick_fresnel(cos_theta_cam, hit_material.albedo);
+            brdf.cos_theta = 1.0;
+            brdf.pdf = 1.0;
         }
-        case 2: { //refract
-            hit_pos -= normal * EPS;//move forward a bit to avoid self-intersection problems
-            return Ray(hit_pos, refract(ray_in.dir, normal, ior));
+        case 2: { //reflect+refract
+            let r0 = pow((1.0 - hit_material.ior) / (1.0 + hit_material.ior), 2.0);
+            let fresnel = schlick_fresnel(cos_theta_cam, vec3f(r0));
+            let fresnel_strength = (fresnel.r + fresnel.g + fresnel.b) / 3.0;
+            var scatter_dir: vec3f;
+            if (f_hash(&seed) < fresnel_strength) {
+                hit_pos += normal * EPS;
+                scatter_dir = reflect(ray_in.dir, normal);
+                brdf.reflectance = fresnel / fresnel_strength;
+            } else {
+                hit_pos -= normal * EPS;
+                scatter_dir = refract(ray_in.dir, normal, ior);
+                brdf.reflectance = (vec3f(1.0) - fresnel) / (1.0 - fresnel_strength);
+            }
+                brdf.scattered_ray = Ray(hit_pos, scatter_dir);
+            brdf.cos_theta = 1.0;
+            brdf.pdf = 1.0;
         }
     }
+    return brdf;
 }
 
 //starts a ray from the surface of the specified object
@@ -419,15 +452,11 @@ fn trace_path(cam_ray: Ray) -> vec3f
         let hit_material = scene_materials[i32(hit_object.material_index)];
 
         result += throughput * hit_material.emission;
-
-        //TODO: calculate reflectance from material
-        let reflectance = hit_material.albedo;
-        throughput *= reflectance;
         
         //direct light sampling
-        if(/*cam_ray.dir.x < 0.0 && */hit_material.material_type == 0){
-		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
-        }
+        // if(/*cam_ray.dir.x < 0.0 && */ hit_material.material_type == 0){
+		//     result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+        // }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
@@ -436,7 +465,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
 			let roulette = f_hash(&seed);
 			if (roulette < p_survive)
 			{//alive
-				throughput *= 1.0/p_survive;//TODO: check paper
+				throughput *= 1.0/p_survive;
 			}
 			else
 			{//die
@@ -444,8 +473,10 @@ fn trace_path(cam_ray: Ray) -> vec3f
 			}
 		}
         
-        //ray,weight = brdf.scatter ray hit
-        ray = get_brdf_ray(ray, hit);
+        let brdf = get_brdf_sample(ray, hit);
+        let weight = brdf.reflectance * brdf.cos_theta / brdf.pdf;
+        throughput *= weight;
+        ray = brdf.scattered_ray;
         bounce++;
     }
 
