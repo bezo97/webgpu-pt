@@ -1,4 +1,4 @@
-import { Pane } from "https://cdn.jsdelivr.net/npm/tweakpane@4.0.3/dist/tweakpane.min.js";
+import { Pane } from "https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js";
 
 export default function createGUI(containerElement, renderer) {
   const pane = new Pane({
@@ -45,6 +45,35 @@ export default function createGUI(containerElement, renderer) {
     view: "separator",
   });
 
+  const renderSettingsPane = pane.addFolder({
+    title: "Render settings",
+    expanded: false,
+  });
+  renderSettingsPane.on("change", (a) => {
+    renderer.invalidateAccumulation();
+  });
+
+  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "max_bounces", {
+    min: 1,
+    max: 20,
+    step: 1,
+  });
+  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "russian_roulette_start_bounce", {
+    min: 1,
+    max: 20,
+    step: 1,
+  });
+  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "russian_roulette_min_p_reflect", {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  });
+  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "russian_roulette_min_p_refract", {
+    min: 0,
+    max: 1,
+    step: 0.01,
+  });
+
   const sceneSettingsPane = pane.addFolder({
     title: "Scene",
     expanded: true,
@@ -81,7 +110,7 @@ export default function createGUI(containerElement, renderer) {
       renderer.invalidateAccumulation();
     });
 
-  const tab = pane.addTab({
+  const tab = sceneSettingsPane.addTab({
     pages: [{ title: "Objects" }, { title: "Materials" }],
   });
   tab.on("change", (a) => {
