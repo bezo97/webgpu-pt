@@ -462,16 +462,20 @@ fn trace_path(cam_ray: Ray) -> vec3f
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
 		{
-            let p_survive = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.0, 1.0);
-			let roulette = f_hash(&seed);
-			if (roulette < p_survive)
-			{//alive
+            var p_survive = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.0, 1.0);
+            //modify survival chance based on the material type
+            if (i32(hit_material.material_type) == 1) {
+                p_survive = max(0.5, p_survive);
+            } else if (i32(hit_material.material_type) == 2) {
+                p_survive = max(0.75, p_survive); //glass: keep alive longer for caustics
+            }
+			let p_die = f_hash(&seed);
+			if (p_die > p_survive) { //die
+                break; 
+            }
+            else { //alive
 				throughput *= 1.0/p_survive;
-			}
-			else
-			{//die
-				break;
-			}
+            }
 		}
         
         let brdf = get_brdf_sample(ray, hit);
