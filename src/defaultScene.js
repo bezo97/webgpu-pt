@@ -6,6 +6,12 @@ const settings = {
     forward: { x: 0.0, y: 0.0, z: 1.0 },
     fov_angle: 20.0,
   },
+  render_settings: {
+    max_bounces: 6,
+    russian_roulette_start_bounce: 3,
+    russian_roulette_min_p_reflect: 0.5,
+    russian_roulette_min_p_refract: 0.75,
+  },
   sky_color: { r: 0.15, g: 0.17, b: 0.2 },
   time: 0.0,
   width: 720,

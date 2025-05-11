@@ -3,7 +3,6 @@ export default `
 //no pre-processor duh
 const PI = 3.14159265;
 const EPS = 2e-5;
-const max_bounces = 6;
 const no_hit = Hit(-1, -1.0, vec3f(0.0));
 
 //uniform structs:
@@ -30,12 +29,21 @@ struct Camera {
     fov_angle: f32,
 }
 
+struct RenderSettings {
+    max_bounces: f32,//i32
+    russian_roulette_start_bounce: f32,//i32
+    russian_roulette_min_p_reflect: f32,
+    russian_roulette_min_p_refract: f32,
+}
+
 struct SceneSettings {
     cam: Camera,
+    render_settings: RenderSettings,
     sky_color: vec3f,
     time: f32,
     width: f32,
     height: f32,
+    //extra data that is not configurable
     total_accumulation_steps: f32,//i32
     workload_accumulation_steps: f32,//i32
     object_count: f32,//i32
@@ -437,7 +445,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
 
     var bounce = 0;
     var ray = cam_ray;
-	while (bounce < max_bounces)
+	while (bounce < i32(settings.render_settings.max_bounces))
 	{
         let fast_eval = bounce > 1;
 		var hit = intersect_scene(ray, fast_eval);
@@ -460,14 +468,14 @@ fn trace_path(cam_ray: Ray) -> vec3f
         }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
-		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
+		if (bounce >= i32(settings.render_settings.russian_roulette_start_bounce))//only after a few bounces (only apply on indirect rays)
 		{
             var p_survive = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.0, 1.0);
             //modify survival chance based on the material type
             if (i32(hit_material.material_type) == 1) {
-                p_survive = max(0.5, p_survive);
+                p_survive = max(p_survive, settings.render_settings.russian_roulette_min_p_reflect);
             } else if (i32(hit_material.material_type) == 2) {
-                p_survive = max(0.75, p_survive); //glass: keep alive longer for caustics
+                p_survive = max(p_survive, settings.render_settings.russian_roulette_min_p_refract); //glass: keep alive longer for caustics
             }
 			let p_die = f_hash(&seed);
 			if (p_die > p_survive) { //die
