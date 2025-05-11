@@ -68,6 +68,18 @@ export default function createGUI(containerElement, renderer) {
     min: 1,
     max: 60,
   });
+  cameraPane
+    .addButton({
+      title: "⟲",
+      label: "Reset",
+    })
+    .on("click", () => {
+      renderer.scene.settings.cam.position = { x: 0.0, y: 1.0, z: -10.0 };
+      renderer.scene.settings.cam.right = { x: 1.0, y: 0.0, z: 0.0 };
+      renderer.scene.settings.cam.up = { x: 0.0, y: 1.0, z: 0.0 };
+      renderer.scene.settings.cam.forward = { x: 0.0, y: 0.0, z: 1.0 };
+      renderer.invalidateAccumulation();
+    });
 
   const tab = pane.addTab({
     pages: [{ title: "Objects" }, { title: "Materials" }],
