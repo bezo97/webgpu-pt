@@ -401,7 +401,7 @@ fn direct_light(hit: Hit, hit_position: vec3f) -> vec3f
     let hit_material = scene_materials[i32(hit_object.material_index)];
 
 	if(length(hit_material.emission) > 0.0) {
-		return vec3f(0.0);//idk?
+		return vec3f(0.0);//we already handle this in the main path tracing loop
     }
 
     let light_source_index = sample_emissive_object();
@@ -419,9 +419,10 @@ fn direct_light(hit: Hit, hit_position: vec3f) -> vec3f
 
     let cos_theta_light = max(0.0, dot(light_ray.dir, -normalize(direct_light_vector)));
     let cos_theta_hit = max(0.0, dot(normalize(direct_light_vector), hit.surface_normal));
-    var direct_contribution = cos_theta_hit * cos_theta_light * scene_materials[i32(light_source.material_index)].emission;
+    let surface_brdf = hit_material.albedo / PI;
+    var direct_contribution = surface_brdf * cos_theta_hit * cos_theta_light * scene_materials[i32(light_source.material_index)].emission;
 
-    //falloff
+    //light falloff: instead of 1/r^2, add +1 to avoid saturation near the light source
     direct_contribution *= 1.0 / (1.0 + length(direct_light_vector)*length(direct_light_vector));
 
     direct_contribution = max(vec3f(0.0), direct_contribution);
@@ -454,9 +455,9 @@ fn trace_path(cam_ray: Ray) -> vec3f
         result += throughput * hit_material.emission;
         
         //direct light sampling
-        // if(/*cam_ray.dir.x < 0.0 && */ hit_material.material_type == 0){
-		//     result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
-        // }
+        if(hit_material.material_type == 0) {
+		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+        }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
 		if (bounce > 3)//only after a few bounces (only apply on indirect rays)
