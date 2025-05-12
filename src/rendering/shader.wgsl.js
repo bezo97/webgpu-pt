@@ -166,6 +166,19 @@ fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32
     return de*de_object.scale;
 }
 
+fn get_tetrahedron_normal(p: vec3f, de_object: SceneObject, fast_eval: bool) -> vec3f {
+    let k1 = vec3f(1.0, -1.0, -1.0);
+    let k2 = vec3f(-1.0, -1.0, 1.0);
+    let k3 = vec3f(-1.0, 1.0, -1.0);
+    let k4 = vec3f(1.0, 1.0, 1.0);
+    return normalize(
+        k1 * estimate_distance(p + EPS * k1, de_object, fast_eval) +
+        k2 * estimate_distance(p + EPS * k2, de_object, fast_eval) +
+        k3 * estimate_distance(p + EPS * k3, de_object, fast_eval) +
+        k4 * estimate_distance(p + EPS * k4, de_object, fast_eval)
+    );
+}
+
 fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
 {
     let fractal_object = scene_objects[object_index];
@@ -217,19 +230,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     }
 
     let p = ray.pos + ray.dir * total_distance;
-    let n_eps = 1000.0*EPS;
-    var surface_normal: vec3f;
-    if(fast_eval) {
-        surface_normal = normalize(vec3f(
-            estimate_distance(vec3f(p.x + n_eps, p.y, p.z), fractal_object, fast_eval),
-            estimate_distance(vec3f(p.x, p.y + n_eps, p.z), fractal_object, fast_eval),
-            estimate_distance(vec3f(p.x, p.y, p.z + n_eps), fractal_object, fast_eval)) - p);
-    } else {
-        surface_normal = normalize(vec3f(
-            estimate_distance(vec3f(p.x + n_eps, p.y, p.z), fractal_object, fast_eval) - estimate_distance(vec3f(p.x - n_eps, p.y, p.z), fractal_object, fast_eval),
-            estimate_distance(vec3f(p.x, p.y + n_eps, p.z), fractal_object, fast_eval) - estimate_distance(vec3f(p.x, p.y - n_eps, p.z), fractal_object, fast_eval),
-            estimate_distance(vec3f(p.x, p.y, p.z + n_eps), fractal_object, fast_eval) - estimate_distance(vec3f(p.x, p.y, p.z - n_eps), fractal_object, fast_eval)));
-    }
+    var surface_normal = get_tetrahedron_normal(p, fractal_object, fast_eval);
 
     return Hit(
         object_index,
@@ -447,7 +448,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
     var ray = cam_ray;
 	while (bounce < i32(settings.render_settings.max_bounces))
 	{
-        let fast_eval = bounce > 1;
+        let fast_eval = bounce > 2;
 		var hit = intersect_scene(ray, fast_eval);
 
         if(hit.object_index == -1)
