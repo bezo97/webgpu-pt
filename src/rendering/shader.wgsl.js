@@ -123,16 +123,17 @@ fn cosWeightedRandomHemisphereDirection(n: vec3f) -> vec3f {
     return normalize( rr );
 }
 
+//Returns (t1, t2) of the ray-sphere intersection or (-1, -1) if no intersection
 fn sphere_t1t2(ray: Ray, radius: f32, position: vec3f) -> vec2f
 {
     let offset = position - ray.pos;
     let b = dot(offset, ray.dir);
-    if(b < 0.0) {
-        return vec2f(0.0);
-    }
+    // if(b < 0.0) {
+    //     return vec2f(-1.0);
+    // } //commented out, because we want to hit the inside of the sphere too
     let c = dot(offset, offset) - b*b;
     if(c > radius*radius){
-        return vec2f(0.0);
+        return vec2f(-1.0);
     }
     let thc = sqrt(radius*radius - c);
     let t1 = b - thc;
@@ -184,15 +185,12 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     let fractal_object = scene_objects[object_index];
     //first check if ray intersects bounding sphere
     let bounding_sphere_t1t2 = sphere_t1t2(ray, fractal_object.scale, fractal_object.position);
-    if(length(bounding_sphere_t1t2) == 0.0) {
-        return no_hit;
+    if(bounding_sphere_t1t2.y < 0.0) {
+        return no_hit;//behind the ray
     }
 
-    var total_distance = 0.0;
-    //start estimation on bounds if we're outside the bounds
-    if(bounding_sphere_t1t2.x > 0.0) {
-        total_distance = bounding_sphere_t1t2.x;
-    }
+    //start estimation on bounds
+    var total_distance = max(EPS, bounding_sphere_t1t2.x);
 
     var surface_eps = EPS;
     var max_marching_steps = 500;
@@ -215,7 +213,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
             return no_hit;//ray intersected the bounding sphere but not the fractal
         }
 
-        if(raystep_estimate < surface_eps)
+        if(abs(raystep_estimate) < surface_eps)
         {
             is_surface_hit = true;
             break;
@@ -226,7 +224,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
-    let p = ray.pos + ray.dir * total_distance * 0.99;//Not sure why this multiplier is needed and idk how to make it more robust
+    let p = ray.pos + ray.dir * total_distance;
     var surface_normal = get_tetrahedron_normal(p, fractal_object, fast_eval);
 
     return Hit(
@@ -241,7 +239,7 @@ fn intersect_sphere(ray: Ray, object_index: i32) -> Hit
     let sphere = scene_objects[object_index];
 
     let t1t2 = sphere_t1t2(ray, sphere.scale, sphere.position);
-    if(length(t1t2) == 0.0) {
+    if(t1t2.y < 0.01) {//TODO: why does this need so big eps?
         return no_hit;
     }
     let t1 = t1t2.x;
@@ -252,7 +250,7 @@ fn intersect_sphere(ray: Ray, object_index: i32) -> Hit
     if(t2 > EPS) {
         t = t2;
     }
-    if(t1 > EPS && t1 < t2) {
+    if(t1 > EPS) {
         t = t1;
     }
 
@@ -299,11 +297,14 @@ fn intersect_scene(ray: Ray, fast_eval: bool) -> Hit {
 fn intersect_shadow(shadow_ray: Ray, max_distance: f32, target_object_index: i32) -> bool {
 	for (var object_index = 0; object_index < i32(settings.object_count); object_index++)
 	{
-		var hit = intersect_object(shadow_ray, object_index, false);
-        if (hit.object_index >= 0 && hit.distance < max_distance && object_index != target_object_index) {
-			return true;
+        if (object_index != target_object_index)
+        {
+		    var hit = intersect_object(shadow_ray, object_index, false);
+            if (hit.object_index >= 0 && hit.distance < max_distance) {
+			    return true;
+            }
+            //TODO: review. handle the case when the shadow ray hits another emissive object, in which case the light sample could come from there?
         }
-        //TODO: review. handle the case when the shadow ray hits another emissive object, in which case the light sample could come from there?
     }
     return false;
 }
@@ -445,7 +446,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
     var ray = cam_ray;
 	while (bounce < i32(settings.render_settings.max_bounces))
 	{
-        let fast_eval = bounce > 2;
+        let fast_eval = false;//bounce > 2;
 		var hit = intersect_scene(ray, fast_eval);
 
         if(hit.object_index == -1)
@@ -461,7 +462,12 @@ fn trace_path(cam_ray: Ray) -> vec3f
         result += throughput * hit_material.emission;
         
         //direct light sampling
-        if(hit_material.material_type == 0) {
+        if(hit_material.material_type == 0)
+        {
+            if(dot(hit.surface_normal, ray.dir) > 0.0) 
+            {//hit from inside
+                hit.surface_normal *= -1;
+            } 
 		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
         }
         
