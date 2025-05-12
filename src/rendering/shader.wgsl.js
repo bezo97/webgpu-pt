@@ -194,30 +194,27 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         total_distance = bounding_sphere_t1t2.x;
     }
 
+    var surface_eps = EPS;
     var max_marching_steps = 500;
+    var raystep_multiplier = 0.9;//aka. fuzzy factor
     if(fast_eval) {
         max_marching_steps = 100;
+        raystep_multiplier = 1.0;
+        surface_eps *= 100.0;
     }
+
     var is_surface_hit = false;
     for(var i = 0; i < max_marching_steps; i++)
     {
         let pos = ray.pos + ray.dir * total_distance;
         var raystep_estimate = estimate_distance(pos, fractal_object, fast_eval);
 
-        var raystep_multiplier = 0.9;//aka. fuzzy factor
-        if(fast_eval) {
-            raystep_multiplier = 1.0;
-        }
         total_distance += raystep_estimate * raystep_multiplier;
 
         if(total_distance > bounding_sphere_t1t2.y) {
             return no_hit;//ray intersected the bounding sphere but not the fractal
         }
 
-        var surface_eps = 0.00001;
-        if(fast_eval) {
-            surface_eps = 0.01;
-        }
         if(raystep_estimate < surface_eps)
         {
             is_surface_hit = true;
@@ -229,7 +226,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
-    let p = ray.pos + ray.dir * total_distance;
+    let p = ray.pos + ray.dir * total_distance * 0.99;//Not sure why this multiplier is needed and idk how to make it more robust
     var surface_normal = get_tetrahedron_normal(p, fractal_object, fast_eval);
 
     return Hit(
