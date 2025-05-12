@@ -12,7 +12,7 @@ const settings = {
     russian_roulette_min_p_reflect: 0.5,
     russian_roulette_min_p_refract: 0.75,
   },
-  sky_color: { r: 0.15, g: 0.17, b: 0.2 },
+  sky_color: { r: 0.02, g: 0.03, b: 0.05 },
   time: 0.0,
   width: 720,
   height: 720,
@@ -28,7 +28,7 @@ const objects = [
   {
     object_type: 0,
     material_index: 1,
-    position: { x: 2.5, y: 1.0, z: -0.5 },
+    position: { x: 0.5, y: 1.0, z: -1.6 },
     scale: 0.25,
   },
   {

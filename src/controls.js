@@ -9,8 +9,10 @@ export function setupCameraControls(renderer, canvas) {
   let isRightDragging = false;
   let lastMouseX = 0;
   let lastMouseY = 0;
+  let disableContextMenu = false;
 
   canvas.onmousedown = (event) => {
+    disableContextMenu = false;
     if (event.button === 0) isLeftDragging = true;
     if (event.button === 2) isRightDragging = true;
     lastMouseX = event.clientX;
@@ -42,6 +44,7 @@ export function setupCameraControls(renderer, canvas) {
     }
 
     if (isRightDragging) {
+      if (Math.abs(deltaX) + Math.abs(deltaY) > 0) disableContextMenu = true;
       //Camera orientation
       const yawRad = -deltaX * rotateSpeed;
       const cosYaw = Math.cos(yawRad);
@@ -90,5 +93,9 @@ export function setupCameraControls(renderer, canvas) {
   };
 
   // Prevent context menu on right-click
-  canvas.oncontextmenu = (event) => event.preventDefault();
+  canvas.oncontextmenu = (event) => {
+    if (disableContextMenu) {
+      event.preventDefault();
+    }
+  };
 }
