@@ -70,6 +70,18 @@ struct BRDFSample {
     pdf: f32,
 }
 
+struct DirectLightSample {
+    contribution: vec3f,
+    light_object_index: i32,
+}
+
+struct MISData {
+    hit: Hit,
+    hit_position: vec3f,
+    brdf: BRDFSample,
+    throughput: vec3f,
+}
+
 //TODO: consider constant memory buffer?
 
 @group(0) @binding(0) var<uniform> settings: SceneSettings;
@@ -109,6 +121,30 @@ fn f_hash3(seed: ptr<private, u32>) -> vec3f {
 
 fn schlick_fresnel(cos_theta: f32, r0: vec3f) -> vec3f {
     return r0 + (vec3f(1.0) - r0) * pow(1.0 - cos_theta, 5.0);
+}
+
+// calculate weight for mis using power heuristic where beta is 2
+// Veach: beta at 2 is empirically best
+fn power_heuristic_beta2(pdf_a: f32, pdf_b: f32) -> f32 {
+    let power_a = pdf_a * pdf_a;
+    let power_b = pdf_b * pdf_b;
+    return power_a / (power_a + power_b);
+}
+
+//
+fn light_pdf(hit_pos: vec3f, hit_normal: vec3f, emissive_object: SceneObject) -> f32 {
+    switch(i32(emissive_object.object_type))
+    {
+        case 0, default: { //sphere
+            //return sqrt(1.0 - clamp(emissive_object.scale * emissive_object.scale / dot(emissive_object.position-hit_pos, emissive_object.position-hit_pos), 0.0, 1.0));
+            let light_pos = emissive_object.position;
+            let light_radius = emissive_object.scale;
+            let light_area = 4.0 * PI * light_radius * light_radius;
+            let cos_theta = max(0.0, dot(hit_normal, normalize(light_pos - hit_pos)));
+            return cos_theta / light_area;
+        }
+    }
+
 }
 
 fn cosWeightedRandomHemisphereDirection(n: vec3f) -> vec3f {
@@ -402,13 +438,13 @@ fn sample_emissive_object() -> i32
     return -1;//no lights in the scene
 }
 
-fn direct_light(hit: Hit, hit_position: vec3f) -> vec3f
+fn direct_light(hit: Hit, hit_position: vec3f) -> DirectLightSample
 {
     let hit_object = scene_objects[hit.object_index];
     let hit_material = scene_materials[i32(hit_object.material_index)];
 
 	if(length(hit_material.emission) > 0.0) {
-		return vec3f(0.0);//we already handle this in the main path tracing loop
+		return DirectLightSample(vec3f(0.0), -1);//we already handle this in the main path tracing loop
     }
 
     let light_source_index = sample_emissive_object();
@@ -421,7 +457,7 @@ fn direct_light(hit: Hit, hit_position: vec3f) -> vec3f
     let is_shadow = intersect_shadow(shadow_ray, length(direct_light_vector), light_source_index);
 
     if(is_shadow) {
-        return vec3f(0.0);
+        return DirectLightSample(vec3f(0.0), light_source_index);
     }
 
     let cos_theta_light = max(0.0, dot(light_ray.dir, -normalize(direct_light_vector)));
@@ -434,16 +470,17 @@ fn direct_light(hit: Hit, hit_position: vec3f) -> vec3f
 
     direct_contribution = max(vec3f(0.0), direct_contribution);
 
-    return direct_contribution;
+    return DirectLightSample(direct_contribution, light_source_index);
 }
 
 fn trace_path(cam_ray: Ray) -> vec3f
 {
     var result = vec3f(0.0);
     var throughput = vec3f(1.0);//is 100% at the camera
-
     var bounce = 0;
     var ray = cam_ray;
+    var prev_bounce_data = MISData();
+
 	while (bounce < i32(settings.render_settings.max_bounces))
 	{
         let fast_eval = false;//bounce > 2;
@@ -453,22 +490,38 @@ fn trace_path(cam_ray: Ray) -> vec3f
         {//no object hit, sky
             var sky = sky_emission(ray.dir);
 			result += throughput * sky;
-            return result;
+            break;
         }
 
         let hit_object = scene_objects[hit.object_index];
         let hit_material = scene_materials[i32(hit_object.material_index)];
 
-        result += throughput * hit_material.emission;
-        
-        //direct light sampling
-        if(hit_material.material_type == 0)
+        if(length(hit_material.emission) > 0.0)
         {
+            var mis_weight = 1.0;
+            if(bounce > 0)
+            {//after the first bounce, we can calculate MIS weight
+                let light_pdf = light_pdf(prev_bounce_data.hit_position, prev_bounce_data.hit.surface_normal, hit_object);
+                mis_weight = power_heuristic_beta2(prev_bounce_data.brdf.pdf, light_pdf);
+            }
+            result += throughput * hit_material.emission * mis_weight;
+            break;//terminate at light hit
+        }
+                
+        let brdf = get_brdf_sample(ray, hit);
+
+        if(hit_material.material_type == 0)
+        {//direct light sampling on diffuse materials
             if(dot(hit.surface_normal, ray.dir) > 0.0) 
             {//hit from inside
                 hit.surface_normal *= -1;
-            } 
-		    result += throughput * direct_light(hit, ray.pos + ray.dir * hit.distance);
+            }
+            let hit_position = ray.pos + ray.dir * hit.distance;
+            let direct_light_sample = direct_light(hit, hit_position);
+            let light_pdf = light_pdf(hit_position, hit.surface_normal, scene_objects[direct_light_sample.light_object_index]);
+            let mis_weight = power_heuristic_beta2(light_pdf, brdf.pdf);
+            
+            result += throughput * direct_light_sample.contribution * mis_weight;
         }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
@@ -489,8 +542,13 @@ fn trace_path(cam_ray: Ray) -> vec3f
 				throughput *= 1.0/p_survive;
             }
 		}
+
+        //save info for next bounce
+        prev_bounce_data.hit = hit;
+        prev_bounce_data.hit_position = ray.pos + ray.dir * hit.distance;
+        prev_bounce_data.brdf = brdf;
+        prev_bounce_data.throughput = throughput;
         
-        let brdf = get_brdf_sample(ray, hit);
         let weight = brdf.reflectance * brdf.cos_theta / brdf.pdf;
         throughput *= weight;
         ray = brdf.scattered_ray;
