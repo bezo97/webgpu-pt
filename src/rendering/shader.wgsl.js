@@ -136,7 +136,7 @@ fn light_pdf(hit_pos: vec3f, hit_normal: vec3f, emissive_object: SceneObject) ->
         case 0, default: { //sphere
             let light_pos = emissive_object.position;
             let light_radius = emissive_object.scale;
-            let light_area = 4.0 * PI * light_radius * light_radius;
+            let light_area = (4.0 * PI * light_radius * light_radius) / 2.0;//area of the hemisphere visible from the hit point
             let cos_theta = max(0.0, dot(hit_normal, normalize(light_pos - hit_pos)));
             return cos_theta / light_area;
         }
