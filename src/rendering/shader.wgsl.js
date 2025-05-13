@@ -3,7 +3,7 @@ export default `
 //no pre-processor duh
 const PI = 3.14159265;
 const EPS = 2e-5;
-const no_hit = Hit(-1, -1.0, vec3f(0.0));
+const no_hit = Hit(-1, -1.0, vec3f(0.0), vec3f(0.0));
 
 //uniform structs:
 
@@ -60,6 +60,7 @@ struct Ray {
 struct Hit {
 	object_index: i32,//-1 means no hit
 	distance: f32,
+    position: vec3f,
 	surface_normal: vec3f,//outer surface
 };
 
@@ -77,9 +78,7 @@ struct DirectLightSample {
 
 struct MISData {
     hit: Hit,
-    hit_position: vec3f,
     brdf: BRDFSample,
-    throughput: vec3f,
 }
 
 //TODO: consider constant memory buffer?
@@ -131,12 +130,10 @@ fn power_heuristic_beta2(pdf_a: f32, pdf_b: f32) -> f32 {
     return power_a / (power_a + power_b);
 }
 
-//
 fn light_pdf(hit_pos: vec3f, hit_normal: vec3f, emissive_object: SceneObject) -> f32 {
     switch(i32(emissive_object.object_type))
     {
         case 0, default: { //sphere
-            //return sqrt(1.0 - clamp(emissive_object.scale * emissive_object.scale / dot(emissive_object.position-hit_pos, emissive_object.position-hit_pos), 0.0, 1.0));
             let light_pos = emissive_object.position;
             let light_radius = emissive_object.scale;
             let light_area = 4.0 * PI * light_radius * light_radius;
@@ -260,12 +257,13 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
-    let p = ray.pos + ray.dir * total_distance;
-    var surface_normal = get_tetrahedron_normal(p, fractal_object, fast_eval);
+    let hit_pos = ray.pos + ray.dir * total_distance;
+    var surface_normal = get_tetrahedron_normal(hit_pos, fractal_object, fast_eval);
 
     return Hit(
         object_index,
         total_distance,
+        hit_pos,
         surface_normal
     );
 }
@@ -290,10 +288,12 @@ fn intersect_sphere(ray: Ray, object_index: i32) -> Hit
         t = t1;
     }
 
-    let surface_normal = normalize((ray.pos+ray.dir*t) - sphere.position);
+    let hit_pos = ray.pos + ray.dir * t;
+    let surface_normal = normalize(hit_pos - sphere.position);
     return Hit(
         object_index,
         t,
+        hit_pos,
         surface_normal
     );
 }
@@ -366,22 +366,22 @@ fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
     }
 
     let cos_theta_cam = max(0.0, dot(-ray_in.dir, normal));
-    var hit_pos = ray_in.pos + ray_in.dir * hit.distance;
+    var ray_origin = hit.position;
     var brdf = BRDFSample();
 
     switch(i32(hit_material.material_type)) { //fun fact: no fallthrough in wgsl, no need for break;
         case 0, default: { //diffuse
-            hit_pos += normal * EPS;//move back a bit to avoid self-intersection problems
+            ray_origin += normal * EPS;//move back a bit to avoid self-intersection problems
             let scatter_dir = cosWeightedRandomHemisphereDirection(normal);
-            brdf.scattered_ray = Ray(hit_pos, scatter_dir);
+            brdf.scattered_ray = Ray(ray_origin, scatter_dir);
             brdf.reflectance = hit_material.albedo/PI;
             brdf.cos_theta = max(0.0, dot(scatter_dir, normal));
             brdf.pdf = dot(scatter_dir, normal) / PI;//pdf for cosine weighted hemisphere
         }
         case 1: { //reflect
-            hit_pos += normal * EPS;//move back a bit to avoid self-intersection problems
+            ray_origin += normal * EPS;//move back a bit to avoid self-intersection problems
             let scatter_dir = reflect(ray_in.dir, normal);
-            brdf.scattered_ray = Ray(hit_pos, scatter_dir);
+            brdf.scattered_ray = Ray(ray_origin, scatter_dir);
             brdf.reflectance = schlick_fresnel(cos_theta_cam, hit_material.albedo);
             brdf.cos_theta = 1.0;
             brdf.pdf = 1.0;
@@ -392,15 +392,15 @@ fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
             let fresnel_strength = (fresnel.r + fresnel.g + fresnel.b) / 3.0;
             var scatter_dir: vec3f;
             if (f_hash(&seed) < fresnel_strength) {
-                hit_pos += normal * EPS;
+                ray_origin += normal * EPS;
                 scatter_dir = reflect(ray_in.dir, normal);
                 brdf.reflectance = fresnel / fresnel_strength;
             } else {
-                hit_pos -= normal * EPS;
+                ray_origin -= normal * EPS;
                 scatter_dir = refract(ray_in.dir, normal, ior);
                 brdf.reflectance = (vec3f(1.0) - fresnel) / (1.0 - fresnel_strength);
             }
-                brdf.scattered_ray = Ray(hit_pos, scatter_dir);
+                brdf.scattered_ray = Ray(ray_origin, scatter_dir);
             brdf.cos_theta = 1.0;
             brdf.pdf = 1.0;
         }
@@ -438,7 +438,7 @@ fn sample_emissive_object() -> i32
     return -1;//no lights in the scene
 }
 
-fn direct_light(hit: Hit, hit_position: vec3f) -> DirectLightSample
+fn direct_light(hit: Hit) -> DirectLightSample
 {
     let hit_object = scene_objects[hit.object_index];
     let hit_material = scene_materials[i32(hit_object.material_index)];
@@ -449,11 +449,11 @@ fn direct_light(hit: Hit, hit_position: vec3f) -> DirectLightSample
 
     let light_source_index = sample_emissive_object();
     let light_source = scene_objects[light_source_index];
-    let preferred_dir = normalize(hit_position - light_source.position);
+    let preferred_dir = normalize(hit.position - light_source.position);
     let light_ray = sample_light_ray(light_source, preferred_dir);
 
-    let direct_light_vector = light_ray.pos - hit_position;
-    let shadow_ray = Ray(hit_position+hit.surface_normal*EPS, normalize(direct_light_vector));
+    let direct_light_vector = light_ray.pos - hit.position;
+    let shadow_ray = Ray(hit.position + hit.surface_normal*EPS, normalize(direct_light_vector));
     let is_shadow = intersect_shadow(shadow_ray, length(direct_light_vector), light_source_index);
 
     if(is_shadow) {
@@ -501,7 +501,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
             var mis_weight = 1.0;
             if(bounce > 0)
             {//after the first bounce, we can calculate MIS weight
-                let light_pdf = light_pdf(prev_bounce_data.hit_position, prev_bounce_data.hit.surface_normal, hit_object);
+                let light_pdf = light_pdf(prev_bounce_data.hit.position, prev_bounce_data.hit.surface_normal, hit_object);
                 mis_weight = power_heuristic_beta2(prev_bounce_data.brdf.pdf, light_pdf);
             }
             result += throughput * hit_material.emission * mis_weight;
@@ -516,9 +516,8 @@ fn trace_path(cam_ray: Ray) -> vec3f
             {//hit from inside
                 hit.surface_normal *= -1;
             }
-            let hit_position = ray.pos + ray.dir * hit.distance;
-            let direct_light_sample = direct_light(hit, hit_position);
-            let light_pdf = light_pdf(hit_position, hit.surface_normal, scene_objects[direct_light_sample.light_object_index]);
+            let direct_light_sample = direct_light(hit);
+            let light_pdf = light_pdf(hit.position, hit.surface_normal, scene_objects[direct_light_sample.light_object_index]);
             let mis_weight = power_heuristic_beta2(light_pdf, brdf.pdf);
             
             result += throughput * direct_light_sample.contribution * mis_weight;
@@ -542,16 +541,15 @@ fn trace_path(cam_ray: Ray) -> vec3f
 				throughput *= 1.0/p_survive;
             }
 		}
-
-        //save info for next bounce
-        prev_bounce_data.hit = hit;
-        prev_bounce_data.hit_position = ray.pos + ray.dir * hit.distance;
-        prev_bounce_data.brdf = brdf;
-        prev_bounce_data.throughput = throughput;
         
         let weight = brdf.reflectance * brdf.cos_theta / brdf.pdf;
         throughput *= weight;
         ray = brdf.scattered_ray;
+
+        //save info for next bounce
+        prev_bounce_data.hit = hit;
+        prev_bounce_data.brdf = brdf;
+
         bounce++;
     }
 
