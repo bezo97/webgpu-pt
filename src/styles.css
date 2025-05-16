@@ -11,10 +11,15 @@ aside {
   margin: 0 8px;
 }
 
-form {
-  border: 1px solid black;
+footer {
+  margin: 4px;
+  text-align: center;
+}
 
-  > * {
-    margin: 8px;
-  }
+a {
+  color: lightblue;
+}
+
+#message {
+  color: red;
 }

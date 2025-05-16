@@ -5,10 +5,16 @@ import { setupCameraControls } from "./controls.js";
 
 const canvas = document.getElementById("main_display");
 const sidepanel = document.getElementById("sidepanel");
+const messageBox = document.getElementById("message");
 
 const renderer = new Renderer(canvas);
 setupCameraControls(renderer, canvas);
 renderer.scene = defaultScene;
-createGUI(sidepanel, renderer);
-await renderer.initialize();
+try {
+  await renderer.initialize();
+} catch (e) {
+  messageBox.innerText = "Failed to initialize: " + e;
+}
 renderer.startRendering();
+
+createGUI(sidepanel, renderer);

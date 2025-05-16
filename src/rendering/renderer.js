@@ -19,7 +19,7 @@ export class Renderer {
   framerate = 0; //fps
   targetFramerate = 60; //fps
   total_accumulation_steps = 0;
-  workload_accumulation_steps = 128;
+  workload_accumulation_steps = 1;
 
   constructor(canvas) {
     this.#displayCanvas = canvas;

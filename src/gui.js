@@ -30,6 +30,11 @@ export default function createGUI(containerElement, renderer) {
     readonly: true,
     format: (v) => v.toFixed(0) + " steps",
   });
+  pane.addBinding(renderer, "total_accumulation_steps", {
+    label: "Total accumulation",
+    readonly: true,
+    format: (v) => v.toFixed(0) + " steps",
+  });
   pane.addBinding(renderer, "framerate", {
     readonly: true,
     format: (v) => v.toFixed(0) + " FPS",
