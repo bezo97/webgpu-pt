@@ -5,6 +5,8 @@ const settings = {
     up: { x: 0.0, y: 1.0, z: 0.0 },
     forward: { x: 0.0, y: 0.0, z: 1.0 },
     fov_angle: 20.0,
+    dof_size: 0.0,
+    focus_distance: 10.0,
   },
   render_settings: {
     max_bounces: 6,

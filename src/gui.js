@@ -99,8 +99,18 @@ export default function createGUI(containerElement, renderer) {
     expanded: false,
   });
   cameraPane.addBinding(renderer.scene.settings.cam, "fov_angle", {
+    label: "Field of view (degrees)",
     min: 1,
     max: 60,
+  });
+  cameraPane.addBinding(renderer.scene.settings.cam, "dof_size", {
+    label: "Depth of field size",
+    min: 0,
+    max: 0.2,
+  });
+  cameraPane.addBinding(renderer.scene.settings.cam, "focus_distance", {
+    min: 0,
+    max: 10,
   });
   cameraPane
     .addButton({

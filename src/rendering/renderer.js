@@ -81,7 +81,7 @@ export class Renderer {
     //TODO: find a way to correctly set up buffer sizes
     this.#settingsBuffer = this.#device.createBuffer({
       label: "settingsBuffer",
-      size: 4 * 4 * 8,
+      size: 4 * 4 * 9,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.#objectsBuffer = this.#device.createBuffer({
@@ -210,6 +210,9 @@ export class Renderer {
         0.0,
         ...[scene.settings.cam.forward.x, scene.settings.cam.forward.y, scene.settings.cam.forward.z],
         scene.settings.cam.fov_angle,
+        scene.settings.cam.dof_size,
+        scene.settings.cam.focus_distance,
+        ...[0.0, 0.0], //padding
         scene.settings.render_settings.max_bounces,
         scene.settings.render_settings.russian_roulette_start_bounce,
         scene.settings.render_settings.russian_roulette_min_p_reflect,

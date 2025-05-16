@@ -27,6 +27,10 @@ struct Camera {
     up: vec3f,
     forward: vec3f,
     fov_angle: f32,
+    dof_size: f32,
+    focus_distance: f32,
+    padding3: f32,
+    padding4: f32,
 }
 
 struct RenderSettings {
@@ -622,7 +626,18 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
         let aa_offset = vec2f(tent(aa_samples.x)+0.5, tent(aa_samples.y)+0.5);
 
         let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
-        let ray = Ray(settings.cam.position, raydir);
+        var ray = Ray(settings.cam.position, raydir);
+
+        if(settings.cam.dof_size > 0.0)
+        {//depth of field
+            let focuspoint = settings.cam.position + (ray.dir*settings.cam.focus_distance / dot(ray.dir, settings.cam.forward)); //divide by cos(theta) so that focus is a plane, not a sphere
+            let aperture_radius = sqrt(f_hash(&seed)) * settings.cam.dof_size;
+            let aperture_angle = f_hash(&seed) * 2.0 * PI;
+            ray.pos += 
+                settings.cam.right * aperture_radius * cos(aperture_angle) + 
+                settings.cam.up    * aperture_radius * sin(aperture_angle);
+            ray.dir = normalize(focuspoint - ray.pos);
+        }
 
         frame_acc += trace_path(ray);
     }
