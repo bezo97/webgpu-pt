@@ -616,7 +616,7 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.total_accumulation_steps);
     //TODO: these could be uniforms
-    let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0);
+    let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0 / 2.0);
     let tlc = settings.cam.forward*fov + settings.cam.up*(settings.height/2) - settings.cam.right*(settings.width/2);
     
     var frame_acc = vec3f(0.0);

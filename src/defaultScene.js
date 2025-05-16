@@ -1,12 +1,12 @@
 const settings = {
   cam: {
-    position: { x: 0.0, y: 1.0, z: -10.0 },
+    position: { x: 0.0, y: 1.0, z: -5.0 },
     right: { x: 1.0, y: 0.0, z: 0.0 },
     up: { x: 0.0, y: 1.0, z: 0.0 },
     forward: { x: 0.0, y: 0.0, z: 1.0 },
-    fov_angle: 20.0,
+    fov_angle: 60.0,
     dof_size: 0.0,
-    focus_distance: 10.0,
+    focus_distance: 3.5,
   },
   render_settings: {
     max_bounces: 6,
@@ -30,13 +30,13 @@ const objects = [
   {
     object_type: 0,
     material_index: 1,
-    position: { x: 0.5, y: 1.0, z: -1.6 },
+    position: { x: 1.0, y: 1.5, z: -1.75 },
     scale: 0.25,
   },
   {
     object_type: 0,
     material_index: 2,
-    position: { x: 0.2, y: 0.25, z: -3.0 },
+    position: { x: -0.3, y: 0.25, z: -2.75 },
     scale: 0.25,
   },
   {

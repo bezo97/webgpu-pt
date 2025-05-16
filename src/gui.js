@@ -101,7 +101,7 @@ export default function createGUI(containerElement, renderer) {
   cameraPane.addBinding(renderer.scene.settings.cam, "fov_angle", {
     label: "Field of view (degrees)",
     min: 1,
-    max: 60,
+    max: 120,
   });
   cameraPane.addBinding(renderer.scene.settings.cam, "dof_size", {
     label: "Depth of field size",
@@ -118,7 +118,7 @@ export default function createGUI(containerElement, renderer) {
       label: "Reset",
     })
     .on("click", () => {
-      renderer.scene.settings.cam.position = { x: 0.0, y: 1.0, z: -10.0 };
+      renderer.scene.settings.cam.position = { x: 0.0, y: 1.0, z: -5.0 };
       renderer.scene.settings.cam.right = { x: 1.0, y: 0.0, z: 0.0 };
       renderer.scene.settings.cam.up = { x: 0.0, y: 1.0, z: 0.0 };
       renderer.scene.settings.cam.forward = { x: 0.0, y: 0.0, z: 1.0 };
