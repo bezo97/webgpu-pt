@@ -12,6 +12,8 @@ struct SceneMaterial {
     albedo: vec3f,
     ior: f32,
     emission: vec3f,
+    roughness: f32,
+    metallic: f32,
 }
 
 struct SceneObject {

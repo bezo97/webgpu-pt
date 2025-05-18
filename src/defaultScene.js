@@ -47,7 +47,7 @@ const objects = [
   },
   {
     object_type: 0,
-    material_index: 4,
+    material_index: 5,
     position: { x: 0.0, y: -9999.0, z: 0.0 },
     scale: 9999,
   },
@@ -60,6 +60,8 @@ const materials = [
     albedo: { r: 0.95, g: 0.5, b: 0.5 },
     ior: 0,
     emission: { r: 0.0, g: 0.0, b: 0.0 },
+    roughness: 0.0,
+    metallic: 0.0,
   },
   {
     name: "White_emitter",
@@ -67,6 +69,8 @@ const materials = [
     albedo: { r: 1.0, g: 1.0, b: 1.0 },
     ior: 0,
     emission: { r: 40.0, g: 40.0, b: 40.0 },
+    roughness: 0.0,
+    metallic: 0.0,
   },
   {
     name: "Simple_glass",
@@ -74,6 +78,8 @@ const materials = [
     albedo: { r: 0.6, g: 0.6, b: 0.6 },
     ior: 1.5,
     emission: { r: 0.0, g: 0.0, b: 0.0 },
+    roughness: 0.0,
+    metallic: 0.0,
   },
   {
     name: "Green_mirror",
@@ -81,13 +87,26 @@ const materials = [
     albedo: { r: 0.2, g: 0.8, b: 0.8 },
     ior: 0.0,
     emission: { r: 0.0, g: 0.0, b: 0.0 },
+    roughness: 0.0,
+    metallic: 0.0,
   },
   {
-    name: "Yellow_diffuse",
-    material_type: 0,
+    name: "Yellow_glossy",
+    material_type: 3,
     albedo: { r: 0.85, g: 0.95, b: 0.5 },
     ior: 0,
     emission: { r: 0.0, g: 0.0, b: 0.0 },
+    roughness: 0.3,
+    metallic: 0.0,
+  },
+  {
+    name: "Gray_diffuse",
+    material_type: 0,
+    albedo: { r: 0.3, g: 0.3, b: 0.3 },
+    ior: 0,
+    emission: { r: 0.0, g: 0.0, b: 0.0 },
+    roughness: 0.0,
+    metallic: 0.0,
   },
 ];
 

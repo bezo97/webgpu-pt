@@ -217,5 +217,13 @@ export default function createGUI(containerElement, renderer) {
       expanded: true,
       color: { type: "float", alpha: false },
     });
+    materialEditorPane.addBinding(mat, "roughness", {
+      min: 0,
+      max: 1,
+    });
+    materialEditorPane.addBinding(mat, "metallic", {
+      min: 0,
+      max: 1,
+    });
   }
 }

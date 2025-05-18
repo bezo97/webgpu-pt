@@ -248,6 +248,10 @@ export class Renderer {
           ...[m.albedo.r, m.albedo.g, m.albedo.b],
           m.ior,
           ...[m.emission.r, m.emission.g, m.emission.b],
+          m.roughness,
+          m.metallic,
+          0.0,
+          0.0,
           0.0,
         ])
       )
