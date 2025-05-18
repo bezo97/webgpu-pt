@@ -523,10 +523,11 @@ fn trace_path(cam_ray: Ray) -> vec3f
                 hit.surface_normal *= -1;
             }
             let direct_light_sample = direct_light(hit);
-            let light_pdf = light_pdf(hit.position, hit.surface_normal, scene_objects[direct_light_sample.light_object_index]);
-            let mis_weight = power_heuristic_beta2(light_pdf, brdf.pdf);
-            
-            result += throughput * direct_light_sample.contribution * mis_weight;
+            if(direct_light_sample.light_object_index != -1 && length(direct_light_sample.contribution) > 0.0) {
+                let light_pdf = light_pdf(hit.position, hit.surface_normal, scene_objects[direct_light_sample.light_object_index]);
+                let mis_weight = power_heuristic_beta2(light_pdf, brdf.pdf);
+                result += throughput * direct_light_sample.contribution * mis_weight;
+            }
         }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
