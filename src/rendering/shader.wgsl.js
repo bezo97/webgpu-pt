@@ -97,8 +97,10 @@ struct MISData {
 
 @group(1) @binding(0) var<storage, read_write> histogram: array<vec4f>;
 
-//TODO: remove and pass as argument
 var<private> seed: u32 = 12345;
+
+var<private> pixel_rand: vec3f = vec3f(0.0);//random offset on the low-discrepancy samples, per pixel
+var<private> current_accumulation_step: u32 = 0u;
 
 // Hash function for 32 bit uint
 // Found here: https://nullprogram.com/blog/2018/07/31/
@@ -122,6 +124,29 @@ fn f_hash2(seed: ptr<private, u32>) -> vec2f {
 }
 fn f_hash3(seed: ptr<private, u32>) -> vec3f {
     return vec3f(f_hash(seed), f_hash(seed), f_hash(seed));
+}
+
+//Low-discrepancy quasirandom sequences
+//Info: https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/
+fn r1(index: u32) -> f32 {
+    let i_m =  f32((current_accumulation_step + index + 1) % 16777216u);
+    return 
+        fract(pixel_rand.x + i_m*0.61803398875); // 1/goldenratio
+}
+fn r2(index: u32) -> vec2f {
+    let i_m =  f32((current_accumulation_step + index + 1) % 16777216u);
+    return vec2f(
+        fract(pixel_rand.x + i_m*0.75487766624),
+        fract(pixel_rand.y + i_m*0.56984029099)
+    );
+}
+fn r3(index: u32) -> vec3f {
+    let i_m =  f32((current_accumulation_step + index + 1) % 16777216u);
+    return vec3f(
+        fract(pixel_rand.x + i_m*0.81917251339),
+        fract(pixel_rand.y + i_m*0.67104360670),
+        fract(pixel_rand.z + i_m*0.54970047790)
+    );
 }
 
 fn schlick_fresnel(cos_theta: f32, r0: vec3f) -> vec3f {
@@ -150,8 +175,11 @@ fn light_pdf(hit_pos: vec3f, hit_normal: vec3f, emissive_object: SceneObject) ->
 
 }
 
-fn cosWeightedRandomHemisphereDirection(n: vec3f) -> vec3f {
-    let r = f_hash2(&seed);
+var<private> scatter_seq_index: u32 = 0;
+var<private> light_seq_index: u32 = 1;
+fn cosWeightedRandomHemisphereDirection(n: vec3f, seq_index: ptr<private, u32>) -> vec3f {
+    let r = r2(*seq_index);
+    *seq_index++;
     let uu = normalize(cross(n, vec3(0.0,1.0,1.0)));
     let vv = cross(uu, n);
     let ra = sqrt(r.y);
@@ -357,6 +385,7 @@ fn sky_emission(ray_dir: vec3f) -> vec3f {
     return sky_strength * settings.sky_color;
 }
 
+var<private> fresnel_seq_index: u32 = 0;
 fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
     let hit_object = scene_objects[hit.object_index];
     let hit_material = scene_materials[i32(hit_object.material_index)];
@@ -378,7 +407,7 @@ fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
     switch(i32(hit_material.material_type)) { //fun fact: no fallthrough in wgsl, no need for break;
         case 0, default: { //diffuse
             ray_origin += normal * EPS;//move back a bit to avoid self-intersection problems
-            let scatter_dir = cosWeightedRandomHemisphereDirection(normal);
+            let scatter_dir = cosWeightedRandomHemisphereDirection(normal, &scatter_seq_index);
             brdf.scattered_ray = Ray(ray_origin, scatter_dir);
             brdf.reflectance = hit_material.albedo/PI;
             brdf.cos_theta = max(0.0, dot(scatter_dir, normal));
@@ -397,7 +426,7 @@ fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
             let fresnel = schlick_fresnel(cos_theta_cam, vec3f(r0));
             let fresnel_strength = (fresnel.r + fresnel.g + fresnel.b) / 3.0;
             var scatter_dir: vec3f;
-            if (f_hash(&seed) < fresnel_strength) {
+            if (r1(fresnel_seq_index) < fresnel_strength) {
                 ray_origin += normal * EPS;
                 scatter_dir = reflect(ray_in.dir, normal);
                 brdf.reflectance = fresnel / fresnel_strength;
@@ -406,7 +435,8 @@ fn get_brdf_sample(ray_in: Ray, hit: Hit) -> BRDFSample {
                 scatter_dir = refract(ray_in.dir, normal, ior);
                 brdf.reflectance = (vec3f(1.0) - fresnel) / (1.0 - fresnel_strength);
             }
-                brdf.scattered_ray = Ray(ray_origin, scatter_dir);
+            fresnel_seq_index++;
+            brdf.scattered_ray = Ray(ray_origin, scatter_dir);
             brdf.cos_theta = 1.0;
             brdf.pdf = 1.0;
         }
@@ -419,7 +449,7 @@ fn sample_light_ray(emissive_object: SceneObject, preferred_direction: vec3f) ->
     switch(i32(emissive_object.object_type))
     {
         case 0, default: { //sphere
-            let dir = cosWeightedRandomHemisphereDirection(preferred_direction);
+            let dir = cosWeightedRandomHemisphereDirection(preferred_direction, &light_seq_index);
             let pos = emissive_object.position + (emissive_object.scale+EPS) * dir;
             return Ray(pos, dir);
         }
@@ -431,7 +461,7 @@ fn sample_light_ray(emissive_object: SceneObject, preferred_direction: vec3f) ->
 //returns the index of the picked object
 fn sample_emissive_object() -> i32
 {
-    var target_index = i32(settings.emissive_object_count * f_hash(&seed));
+    var target_index = i32(settings.emissive_object_count * r1(light_seq_index));
     for (var i = 0; i < i32(settings.object_count); i++)
     {
         if (length(scene_materials[i32(scene_objects[i].material_index)].emission) > 0.0) {
@@ -483,11 +513,11 @@ fn trace_path(cam_ray: Ray) -> vec3f
 {
     var result = vec3f(0.0);
     var throughput = vec3f(1.0);//is 100% at the camera
-    var bounce = 0;
+    var bounce = 0u;
     var ray = cam_ray;
     var prev_bounce_data = MISData();
 
-	while (bounce < i32(settings.render_settings.max_bounces))
+	while (bounce < u32(settings.render_settings.max_bounces))
 	{
         let fast_eval = false;//bounce > 2;
 		var hit = intersect_scene(ray, fast_eval);
@@ -531,7 +561,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
         }
         
         //russian roulette: for unbiased rendering, stop bouncing if ray is unimportant
-		if (bounce >= i32(settings.render_settings.russian_roulette_start_bounce))//only after a few bounces (only apply on indirect rays)
+		if (bounce >= u32(settings.render_settings.russian_roulette_start_bounce))//only after a few bounces (only apply on indirect rays)
 		{
             var p_survive = clamp(max(throughput.x, max(throughput.y, throughput.z)), 0.0, 1.0);
             //modify survival chance based on the material type
@@ -540,7 +570,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
             } else if (i32(hit_material.material_type) == 2) {
                 p_survive = max(p_survive, settings.render_settings.russian_roulette_min_p_refract); //glass: keep alive longer for caustics
             }
-			let p_die = f_hash(&seed);
+			let p_die = r1(bounce);
 			if (p_die > p_survive) { //die
                 break; 
             }
@@ -618,14 +648,18 @@ fn tent(x_in: f32) -> f32 {
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.total_accumulation_steps);
+    pixel_rand = f_hash3(&seed);
+
     //TODO: these could be uniforms
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0 / 2.0);
     let tlc = settings.cam.forward*fov + settings.cam.up*(settings.height/2) - settings.cam.right*(settings.width/2);
     
     var frame_acc = vec3f(0.0);
-    for (var i = 0; i < i32(settings.workload_accumulation_steps); i++)
+    for (var i = 0u; i < u32(settings.workload_accumulation_steps); i++)
     {
-        let aa_samples = f_hash2(&seed);
+        current_accumulation_step = u32(settings.total_accumulation_steps) + i;
+
+        let aa_samples = r2(i);
         let aa_offset = vec2f(tent(aa_samples.x)+0.5, tent(aa_samples.y)+0.5);
 
         let raydir = normalize(tlc + settings.cam.right * (coord_in.x + aa_offset.x) - settings.cam.up * (coord_in.y + aa_offset.y));
@@ -634,8 +668,9 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
         if(settings.cam.dof_size > 0.0)
         {//depth of field
             let focuspoint = settings.cam.position + (ray.dir*settings.cam.focus_distance / dot(ray.dir, settings.cam.forward)); //divide by cos(theta) so that focus is a plane, not a sphere
-            let aperture_radius = sqrt(f_hash(&seed)) * settings.cam.dof_size;
-            let aperture_angle = f_hash(&seed) * 2.0 * PI;
+            let dof_samples = r2(i);
+            let aperture_radius = sqrt(dof_samples.x) * settings.cam.dof_size;
+            let aperture_angle = dof_samples.y * 2.0 * PI;
             ray.pos += 
                 settings.cam.right * aperture_radius * cos(aperture_angle) + 
                 settings.cam.up    * aperture_radius * sin(aperture_angle);
