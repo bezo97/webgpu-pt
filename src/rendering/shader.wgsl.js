@@ -234,16 +234,16 @@ fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32
     return de*de_object.scale;
 }
 
-fn get_tetrahedron_normal(p: vec3f, de_object: SceneObject, fast_eval: bool) -> vec3f {
+fn get_tetrahedron_normal(p: vec3f, de_object: SceneObject, normal_eps: f32, fast_eval: bool) -> vec3f {
     let k1 = vec3f(1.0, -1.0, -1.0);
     let k2 = vec3f(-1.0, -1.0, 1.0);
     let k3 = vec3f(-1.0, 1.0, -1.0);
     let k4 = vec3f(1.0, 1.0, 1.0);
     return normalize(
-        k1 * estimate_distance(p + EPS * k1, de_object, fast_eval) +
-        k2 * estimate_distance(p + EPS * k2, de_object, fast_eval) +
-        k3 * estimate_distance(p + EPS * k3, de_object, fast_eval) +
-        k4 * estimate_distance(p + EPS * k4, de_object, fast_eval)
+        k1 * estimate_distance(p + normal_eps * k1, de_object, fast_eval) +
+        k2 * estimate_distance(p + normal_eps * k2, de_object, fast_eval) +
+        k3 * estimate_distance(p + normal_eps * k3, de_object, fast_eval) +
+        k4 * estimate_distance(p + normal_eps * k4, de_object, fast_eval)
     );
 }
 
@@ -259,15 +259,15 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     //start estimation on bounds
     var total_distance = max(EPS, bounding_sphere_t1t2.x);
 
-    var surface_eps = EPS;
     var max_marching_steps = 500;
     var raystep_multiplier = 0.9;//aka. fuzzy factor
     if(fast_eval) {
         max_marching_steps = 100;
         raystep_multiplier = 1.0;
-        surface_eps *= 100.0;
     }
 
+    let pixel_angular_resolution = 2.0*tan((settings.cam.fov_angle * PI / 180.0)*0.5) / settings.width; //TODO: this could be a uniform
+    var surface_eps = EPS;
     var is_surface_hit = false;
     for(var i = 0; i < max_marching_steps; i++)
     {
@@ -278,6 +278,12 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
 
         if(total_distance > bounding_sphere_t1t2.y) {
             return no_hit;//ray intersected the bounding sphere but not the fractal
+        }
+
+        let distance_to_camera = length(settings.cam.position - pos);
+        surface_eps = max(EPS, 0.1*distance_to_camera * pixel_angular_resolution);
+        if(fast_eval) {
+            surface_eps *= 100.0;
         }
 
         if(abs(raystep_estimate) < surface_eps)
@@ -291,8 +297,9 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
+    total_distance -= 2.0*surface_eps; //move back a bit to avoid self-intersection problems
     let hit_pos = ray.pos + ray.dir * total_distance;
-    var surface_normal = get_tetrahedron_normal(hit_pos, fractal_object, fast_eval);
+    var surface_normal = get_tetrahedron_normal(hit_pos, fractal_object, surface_eps, fast_eval);
 
     return Hit(
         object_index,
