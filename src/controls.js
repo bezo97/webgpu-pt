@@ -1,4 +1,4 @@
-const moveSpeed = 0.1;
+const moveSpeed = 0.02;
 const rotateSpeed = 0.005;
 
 /**
@@ -10,6 +10,7 @@ export function setupCameraControls(renderer, canvas) {
   let lastMouseX = 0;
   let lastMouseY = 0;
   let disableContextMenu = false;
+  let relativeMoveSpeed = 1.0;
 
   canvas.onmousedown = (event) => {
     disableContextMenu = false;
@@ -37,10 +38,9 @@ export function setupCameraControls(renderer, canvas) {
       const moveRight = { x: cam.right.x, y: cam.right.y, z: cam.right.z };
       const moveForward = { x: cam.forward.x, y: cam.forward.y, z: cam.forward.z };
 
-      cam.position.x += moveSpeed * (deltaX * moveRight.x - deltaY * moveForward.x);
-      cam.position.y += moveSpeed * (deltaX * moveRight.y - deltaY * moveForward.y);
-      cam.position.z += moveSpeed * (deltaX * moveRight.z - deltaY * moveForward.z);
-      renderer.invalidateAccumulation();
+      cam.position.x += moveSpeed * relativeMoveSpeed * (deltaX * moveRight.x - deltaY * moveForward.x);
+      cam.position.y += moveSpeed * relativeMoveSpeed * (deltaX * moveRight.y - deltaY * moveForward.y);
+      cam.position.z += moveSpeed * relativeMoveSpeed * (deltaX * moveRight.z - deltaY * moveForward.z);
     }
 
     if (isRightDragging) {
@@ -87,8 +87,13 @@ export function setupCameraControls(renderer, canvas) {
       cam.up.x = cam.forward.y * cam.right.z - cam.forward.z * cam.right.y;
       cam.up.y = cam.forward.z * cam.right.x - cam.forward.x * cam.right.z;
       cam.up.z = cam.forward.x * cam.right.y - cam.forward.y * cam.right.x;
+    }
 
+    if (isLeftDragging || isRightDragging) {
       renderer.invalidateAccumulation();
+      renderer.getCenterDepth().then((depth) => {
+        if (depth) relativeMoveSpeed = Math.min(1.0, Math.max(0.00001, depth));
+      });
     }
   };
 

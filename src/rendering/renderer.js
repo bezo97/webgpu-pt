@@ -11,6 +11,8 @@ export class Renderer {
   #objectsBuffer;
   #materialsBuffer;
   #histogramBuffer;
+  #resultsBuffer; //shader writes output data here
+  #resultsReadBuffer; //resultsBuffer is copied to this buffer before reading to avoid blocking the GPU queue
 
   #frameCounter = 0;
 
@@ -20,6 +22,7 @@ export class Renderer {
   targetFramerate = 60; //fps
   total_accumulation_steps = 0;
   workload_accumulation_steps = 1;
+  resultsBufferReadInProgress = false;
 
   constructor(canvas) {
     this.#displayCanvas = canvas;
@@ -79,6 +82,7 @@ export class Renderer {
 
     //setup uniform buffers
     //TODO: find a way to correctly set up buffer sizes
+    //TODO: consider using a single buffer
     this.#settingsBuffer = this.#device.createBuffer({
       label: "settingsBuffer",
       size: 4 * 4 * 9,
@@ -99,7 +103,17 @@ export class Renderer {
       size: 4 * 4 * this.scene.settings.width * this.scene.settings.height,
       usage: GPUBufferUsage.STORAGE,
     });
-    //TODO: consider using a single buffer
+    const resultsBufferSize = 1 * 4;
+    this.#resultsBuffer = this.#device.createBuffer({
+      label: "resultsBuffer",
+      size: resultsBufferSize,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+    this.#resultsReadBuffer = this.#device.createBuffer({
+      label: "resultsReadBuffer",
+      size: resultsBufferSize,
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
 
     //setup shader
     const rendererShaderModule = this.#device.createShaderModule({
@@ -153,6 +167,10 @@ export class Renderer {
         {
           binding: 0,
           resource: { buffer: this.#histogramBuffer },
+        },
+        {
+          binding: 1,
+          resource: { buffer: this.#resultsBuffer },
         },
       ],
     });
@@ -292,5 +310,21 @@ export class Renderer {
 
   invalidateAccumulation() {
     this.total_accumulation_steps = 0;
+  }
+
+  async getCenterDepth() {
+    if (!this.isRendering || this.resultsBufferReadInProgress) return undefined;
+    this.resultsBufferReadInProgress = true;
+    //copy resultsBuffer to resultsReadBuffer
+    const commandEncoder = this.#device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(this.#resultsBuffer, 0, this.#resultsReadBuffer, 0, 1 * 4);
+    this.#device.queue.submit([commandEncoder.finish()]);
+    //map specific part of the results buffer to read the center depth value
+    //Note: mapAsync already waits for the GPU queue to finish
+    await this.#resultsReadBuffer.mapAsync(GPUMapMode.READ, 0, 1 * 4);
+    const centerDepthBufferCopy = this.#resultsReadBuffer.getMappedRange(0, 1 * 4).slice(0);
+    this.#resultsReadBuffer.unmap();
+    this.resultsBufferReadInProgress = false;
+    return new Float32Array(centerDepthBufferCopy)[0];
   }
 }

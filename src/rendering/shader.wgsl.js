@@ -56,6 +56,10 @@ struct SceneSettings {
     emissive_object_count: f32,//i32
 };
 
+struct PassResults {
+    center_depth: f32,
+}
+
 //helper structs:
 
 struct Ray {
@@ -97,10 +101,13 @@ struct MISData {
 
 @group(1) @binding(0) var<storage, read_write> histogram: array<vec4f>;
 
+@group(1) @binding(1) var<storage, read_write> results: PassResults;
+
 var<private> seed: u32 = 12345;
 
 var<private> pixel_rand: vec3f = vec3f(0.0);//random offset on the low-discrepancy samples, per pixel
 var<private> current_accumulation_step: u32 = 0u;
+var<private> save_depth_data: bool = false;
 
 // Hash function for 32 bit uint
 // Found here: https://nullprogram.com/blog/2018/07/31/
@@ -536,6 +543,11 @@ fn trace_path(cam_ray: Ray) -> vec3f
             break;
         }
 
+        if(bounce == 0 && save_depth_data)
+        {//save depth data for the center pixel
+            results.center_depth = hit.distance;
+        }
+
         let hit_object = scene_objects[hit.object_index];
         let hit_material = scene_materials[i32(hit_object.material_index)];
 
@@ -555,7 +567,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
 
         if(hit_material.material_type == 0)
         {//direct light sampling on diffuse materials
-            if(dot(hit.surface_normal, ray.dir) > 0.0) 
+            if(dot(hit.surface_normal, ray.dir) > 0.0)
             {//hit from inside
                 hit.surface_normal *= -1;
             }
@@ -656,6 +668,7 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.total_accumulation_steps);
     pixel_rand = f_hash3(&seed);
+    save_depth_data = (settings.total_accumulation_steps == 0.0 && u32(coord_in.x)==u32(settings.width/2.0) && u32(coord_in.y)==u32(settings.height/2.0));
 
     //TODO: these could be uniforms
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0 / 2.0);
