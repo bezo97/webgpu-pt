@@ -667,7 +667,6 @@ fn tent(x_in: f32) -> f32 {
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.total_accumulation_steps);
-    pixel_rand = f_hash3(&seed);
     save_depth_data = (settings.total_accumulation_steps == 0.0 && u32(coord_in.x)==u32(settings.width/2.0) && u32(coord_in.y)==u32(settings.height/2.0));
 
     //TODO: these could be uniforms
@@ -678,6 +677,8 @@ fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     for (var i = 0u; i < u32(settings.workload_accumulation_steps); i++)
     {
         current_accumulation_step = u32(settings.total_accumulation_steps) + i;
+        pixel_rand = f_hash3(&seed);
+        seed++;
 
         let aa_samples = r2(i);
         let aa_offset = vec2f(tent(aa_samples.x)+0.5, tent(aa_samples.y)+0.5);
