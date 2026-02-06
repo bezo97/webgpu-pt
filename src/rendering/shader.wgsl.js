@@ -541,10 +541,36 @@ fn trace_path(cam_ray: Ray) -> vec3f
     var ray = cam_ray;
     var prev_bounce_data = MISData();
 
+    //for volumetric fog, we keep track of how far away is the next particle
+    var particle_distance = 0.0;
+
 	while (bounce < u32(settings.render_settings.max_bounces))
 	{
         let fast_eval = false;//bounce > 2;
 		var hit = intersect_scene(ray, fast_eval);
+
+        if(particle_distance <= 0.0)
+        {
+            //random distance to next particle based on density
+            particle_distance = f_hash(&seed) * 10.0;
+        }
+        if(hit.distance > particle_distance)
+        {
+            //hit a fog particle before any object
+            throughput *= vec3f(0.9); //fog absorption
+            result += throughput * vec3f(0.0); //fog emission
+
+            ray.pos += ray.dir * particle_distance;
+            let height_from_ground = ray.pos.y;
+            ray.dir = normalize(ray.dir + 0.1 * cosWeightedRandomHemisphereDirection(-ray.dir, &scatter_seq_index)); //fog scattering
+
+            particle_distance = 0.0;//we hit the fog particle, get a new one next time
+
+            prev_bounce_data.is_material_specular = true;//fog is non-specular
+            bounce++;
+            continue;
+        }
+
 
         if(hit.object_index == -1)
         {//no object hit, sky
@@ -557,6 +583,8 @@ fn trace_path(cam_ray: Ray) -> vec3f
         {//save depth data for the center pixel
             results.center_depth = hit.distance;
         }
+
+        particle_distance -= hit.distance;//moving closer to the particle
 
         let hit_object = scene_objects[hit.object_index];
         let hit_material = scene_materials[i32(hit_object.material_index)];
