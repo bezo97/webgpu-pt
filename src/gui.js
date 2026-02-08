@@ -7,6 +7,10 @@ export default function createGUI(containerElement, renderer) {
     expanded: true,
   });
 
+  let selectedObjectIndex = null;
+  // Represents what the next click on the canvas will do (select, setPosition, lookAt, etc.)
+  let clickAction = null;
+
   const startStopButton = pane
     .addButton({
       title: "⏸️",
@@ -85,6 +89,42 @@ export default function createGUI(containerElement, renderer) {
   });
   sceneSettingsPane.on("change", (a) => {
     renderer.invalidateAccumulation();
+  });
+
+  // Store references to current object editor pane and button for button reset
+  let currentObjectEditorPane = null;
+  let currentSetPositionButton = null;
+
+  renderer.canvas.addEventListener("click", async (event) => {
+    if (selectedObjectIndex !== null && clickAction === "position") {
+      const canvas = renderer.canvas;
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const depth = await renderer.getDepthAt(x, y);
+      if (depth !== undefined && depth > 0) {
+        const worldPos = renderer.screenToWorld(x, y, depth);
+        renderer.scene.objects[selectedObjectIndex].position = worldPos;
+
+        // Deactivate click-to-position
+        selectedObjectIndex = null;
+        clickAction = null;
+
+        if (currentSetPositionButton) {
+          currentSetPositionButton.title = "🎯 Set from canvas";
+          currentSetPositionButton.label = "position";
+        }
+        currentObjectEditorPane?.refresh();
+
+        renderer.invalidateAccumulation();
+        // Ensure rendering continues after accumulation is reset
+        if (!renderer.isRendering) {
+          renderer.startRendering();
+        }
+      } else {
+        console.log("No depth data available at clicked position");
+      }
+    }
   });
 
   sceneSettingsPane.addBinding(renderer.scene.settings, "sky_color", {
@@ -175,12 +215,33 @@ export default function createGUI(containerElement, renderer) {
       max: 5,
     });
 
-    const deleteObjectButton = objectEditorPane
-      .addButton({
-        title: "🗑",
-        label: "Delete object",
-      })
-      .on("click", () => {});
+    const setPositionFromCanvasButton = objectEditorPane.addButton({
+      title: "🎯 Set from canvas",
+      label: "position",
+    });
+    setPositionFromCanvasButton.on("click", () => {
+      if (clickAction === "position") {
+        clickAction = null;
+        currentObjectEditorPane = null;
+        currentSetPositionButton = null;
+        selectedObjectIndex = null;
+        setPositionFromCanvasButton.title = "🎯 Set from canvas";
+        setPositionFromCanvasButton.label = "position";
+      } else {
+        clickAction = "position";
+        currentObjectEditorPane = objectEditorPane;
+        currentSetPositionButton = setPositionFromCanvasButton;
+        selectedObjectIndex = renderer.scene.objects.indexOf(obj);
+        setPositionFromCanvasButton.title = "❌ Cancel positioning";
+        setPositionFromCanvasButton.label = "position";
+      }
+    });
+
+    const deleteObjectButton = objectEditorPane.addButton({
+      title: "🗑",
+      label: "Delete object",
+    });
+    deleteObjectButton.on("click", () => {});
   }
 
   const addMaterialButton = materialsPane

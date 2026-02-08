@@ -42,6 +42,10 @@ struct RenderSettings {
     russian_roulette_min_p_refract: f32,
 }
 
+struct QuerySettings {
+    query_pixel: vec2f,
+}
+
 struct SceneSettings {
     cam: Camera,
     render_settings: RenderSettings,
@@ -99,6 +103,8 @@ struct MISData {
 @group(0) @binding(1) var<storage, read> scene_objects: array<SceneObject>;
 
 @group(0) @binding(2) var<storage, read> scene_materials: array<SceneMaterial>;
+
+@group(0) @binding(3) var<uniform> query_settings: QuerySettings;
 
 @group(1) @binding(0) var<storage, read_write> histogram: array<vec4f>;
 
@@ -677,7 +683,10 @@ fn tent(x_in: f32) -> f32 {
 fn fragmentMain(@builtin(position) coord_in: vec4f) -> @location(0) vec4f {
     let bigprime: u32 = 1717885903u;
     seed = bigprime*(u32(coord_in.x) + u32(coord_in.y)*u32(settings.width)) + u32(settings.total_accumulation_steps);
-    save_depth_data = (settings.total_accumulation_steps == 0.0 && u32(coord_in.x)==u32(settings.width/2.0) && u32(coord_in.y)==u32(settings.height/2.0));
+    
+    let query_pixel = query_settings.query_pixel;
+    save_depth_data = (query_pixel.x >= 0.0 && query_pixel.y >= 0.0 && 
+                       u32(coord_in.x) == u32(query_pixel.x) && u32(coord_in.y) == u32(query_pixel.y));
 
     //TODO: these could be uniforms
     let fov = (settings.width/2) / tan(settings.cam.fov_angle * PI/180.0 / 2.0);

@@ -11,8 +11,9 @@ export class Renderer {
   #objectsBuffer;
   #materialsBuffer;
   #histogramBuffer;
-  #resultsBuffer; //shader writes output data here
-  #resultsReadBuffer; //resultsBuffer is copied to this buffer before reading to avoid blocking the GPU queue
+  #resultsBuffer; //contains data produced by the shader, eg. the queried depth value
+  #resultsReadBuffer; //resultsBuffer is copied here for reading
+  #querySettingsBuffer; //can set the pixel coordinates for depth query, or disable it with (-1, -1)
 
   #frameCounter = 0;
 
@@ -23,6 +24,10 @@ export class Renderer {
   total_accumulation_steps = 0;
   workload_accumulation_steps = 1;
   resultsBufferReadInProgress = false;
+
+  get canvas() {
+    return this.#displayCanvas;
+  }
 
   constructor(canvas) {
     this.#displayCanvas = canvas;
@@ -114,6 +119,13 @@ export class Renderer {
       size: resultsBufferSize,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
+    this.#querySettingsBuffer = this.#device.createBuffer({
+      label: "querySettingsBuffer",
+      size: 2 * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    //init to -1, meaning querying is disabled
+    this.#device.queue.writeBuffer(this.#querySettingsBuffer, 0, new Float32Array([-1.0, -1.0]));
 
     //setup shader
     const rendererShaderModule = this.#device.createShaderModule({
@@ -157,6 +169,10 @@ export class Renderer {
         {
           binding: 2,
           resource: { buffer: this.#materialsBuffer },
+        },
+        {
+          binding: 3,
+          resource: { buffer: this.#querySettingsBuffer },
         },
       ],
     });
@@ -208,57 +224,24 @@ export class Renderer {
   }
 
   #renderFrame = async () => {
-    const scene = this.scene;
     //update state
-    scene.settings.time = document.timeline.currentTime / 1000;
+    this.scene.settings.time = document.timeline.currentTime / 1000;
     //wait for previous frame finish
     await this.#device.queue.onSubmittedWorkDone();
     this.#frameCounter++;
 
     //update uniforms
-    this.#device.queue.writeBuffer(
-      this.#settingsBuffer,
-      0,
-      new Float32Array([
-        ...[scene.settings.cam.position.x, scene.settings.cam.position.y, scene.settings.cam.position.z],
-        0.0,
-        ...[scene.settings.cam.right.x, scene.settings.cam.right.y, scene.settings.cam.right.z],
-        0.0,
-        ...[scene.settings.cam.up.x, scene.settings.cam.up.y, scene.settings.cam.up.z],
-        0.0,
-        ...[scene.settings.cam.forward.x, scene.settings.cam.forward.y, scene.settings.cam.forward.z],
-        scene.settings.cam.fov_angle,
-        scene.settings.cam.dof_size,
-        scene.settings.cam.focus_distance,
-        ...[0.0, 0.0], //padding
-        scene.settings.render_settings.max_bounces,
-        scene.settings.render_settings.russian_roulette_start_bounce,
-        scene.settings.render_settings.russian_roulette_min_p_reflect,
-        scene.settings.render_settings.russian_roulette_min_p_refract,
-        ...[scene.settings.sky_color.r, scene.settings.sky_color.g, scene.settings.sky_color.b],
-        scene.settings.time,
-        scene.settings.width,
-        scene.settings.height,
-        //extra data that is not configurable
-        this.total_accumulation_steps,
-        this.workload_accumulation_steps,
-        scene.objects.length, //object_count
-        scene.objects.filter((o) => {
-          const e = scene.materials[o.material_index].emission;
-          return e.r + e.g + e.b > 0.0;
-        }).length, //emissive_object_count
-      ])
-    );
+    this.#updateSettingsBuffer();
     this.#device.queue.writeBuffer(
       this.#objectsBuffer,
       0,
-      new Float32Array(scene.objects.flatMap((o) => [o.object_type, o.material_index, 0.0, 0.0, ...[o.position.x, o.position.y, o.position.z], o.scale]))
+      new Float32Array(this.scene.objects.flatMap((o) => [o.object_type, o.material_index, 0.0, 0.0, ...[o.position.x, o.position.y, o.position.z], o.scale])),
     );
     this.#device.queue.writeBuffer(
       this.#materialsBuffer,
       0,
       new Float32Array(
-        scene.materials.flatMap((m) => [
+        this.scene.materials.flatMap((m) => [
           m.material_type,
           0.0,
           0.0,
@@ -271,8 +254,8 @@ export class Renderer {
           0.0,
           0.0,
           0.0,
-        ])
-      )
+        ]),
+      ),
     );
 
     const commandEncoder = this.#device.createCommandEncoder();
@@ -312,19 +295,112 @@ export class Renderer {
     this.total_accumulation_steps = 0;
   }
 
-  async getCenterDepth() {
-    if (!this.isRendering || this.resultsBufferReadInProgress) return undefined;
+  async getDepthAt(x, y) {
+    if (!this.isRendering || this.resultsBufferReadInProgress) return Promise.resolve(undefined);
+
     this.resultsBufferReadInProgress = true;
-    //copy resultsBuffer to resultsReadBuffer
-    const commandEncoder = this.#device.createCommandEncoder();
-    commandEncoder.copyBufferToBuffer(this.#resultsBuffer, 0, this.#resultsReadBuffer, 0, 1 * 4);
-    this.#device.queue.submit([commandEncoder.finish()]);
-    //map specific part of the results buffer to read the center depth value
-    //Note: mapAsync already waits for the GPU queue to finish
-    await this.#resultsReadBuffer.mapAsync(GPUMapMode.READ, 0, 1 * 4);
-    const centerDepthBufferCopy = this.#resultsReadBuffer.getMappedRange(0, 1 * 4).slice(0);
-    this.#resultsReadBuffer.unmap();
-    this.resultsBufferReadInProgress = false;
-    return new Float32Array(centerDepthBufferCopy)[0];
+
+    try {
+      // render 1 frame to save the
+      await this.#updateQuerySettings(x, y);
+      await this.#renderFrame();
+
+      // Copy resultsBuffer to resultsReadBuffer
+      const commandEncoder = this.#device.createCommandEncoder();
+      commandEncoder.copyBufferToBuffer(this.#resultsBuffer, 0, this.#resultsReadBuffer, 0, 1 * 4);
+      this.#device.queue.submit([commandEncoder.finish()]);
+
+      // Wait for GPU and read the depth value
+      await this.#resultsReadBuffer.mapAsync(GPUMapMode.READ, 0, 1 * 4);
+      const depthBufferCopy = this.#resultsReadBuffer.getMappedRange(0, 1 * 4).slice(0);
+      this.#resultsReadBuffer.unmap();
+
+      // disable depth capture
+      await this.#updateQuerySettings(-1, -1);
+
+      this.resultsBufferReadInProgress = false;
+      return Promise.resolve(new Float32Array(depthBufferCopy)[0]);
+    } catch (e) {
+      this.resultsBufferReadInProgress = false;
+      throw e;
+    }
+  }
+
+  async #updateQuerySettings(query_pixel_x, query_pixel_y) {
+    this.#device.queue.writeBuffer(this.#querySettingsBuffer, 0, new Float32Array([query_pixel_x, query_pixel_y]));
+  }
+
+  async #updateSettingsBuffer() {
+    const scene = this.scene;
+    this.#device.queue.writeBuffer(
+      this.#settingsBuffer,
+      0,
+      new Float32Array([
+        ...[scene.settings.cam.position.x, scene.settings.cam.position.y, scene.settings.cam.position.z],
+        0.0,
+        ...[scene.settings.cam.right.x, scene.settings.cam.right.y, scene.settings.cam.right.z],
+        0.0,
+        ...[scene.settings.cam.up.x, scene.settings.cam.up.y, scene.settings.cam.up.z],
+        0.0,
+        ...[scene.settings.cam.forward.x, scene.settings.cam.forward.y, scene.settings.cam.forward.z],
+        scene.settings.cam.fov_angle,
+        scene.settings.cam.dof_size,
+        scene.settings.cam.focus_distance,
+        ...[0.0, 0.0], //padding
+        scene.settings.render_settings.max_bounces,
+        scene.settings.render_settings.russian_roulette_start_bounce,
+        scene.settings.render_settings.russian_roulette_min_p_reflect,
+        scene.settings.render_settings.russian_roulette_min_p_refract,
+        ...[scene.settings.sky_color.r, scene.settings.sky_color.g, scene.settings.sky_color.b],
+        scene.settings.time,
+        scene.settings.width,
+        scene.settings.height,
+        //extra data that is not configurable
+        this.total_accumulation_steps,
+        this.workload_accumulation_steps,
+        scene.objects.length, //object_count
+        scene.objects.filter((o) => {
+          const e = scene.materials[o.material_index].emission;
+          return e.r + e.g + e.b > 0.0;
+        }).length, //emissive_object_count
+      ]),
+    );
+  }
+
+  /**
+   * @param {number} x 0-1 normalized screen coordinates
+   * @param {number} y 0-1 normalized screen coordinates
+   * @param {number} depth depth value at the pixel, as returned by getDepthAt()
+   * @returns {{x: number, y: number, z: number}} world position at specified screen coordinates and depth
+   */
+  screenToWorld(x, y, depth) {
+    const canvas = this.canvas;
+    const cam = this.scene.settings.cam;
+
+    const fovRad = (cam.fov_angle * Math.PI) / 180.0;
+    const fov = canvas.width / 2 / Math.tan(fovRad / 2.0);
+
+    // top left corner
+    const tlcX = cam.forward.x * fov + cam.up.x * (canvas.height / 2) - cam.right.x * (canvas.width / 2);
+    const tlcY = cam.forward.y * fov + cam.up.y * (canvas.height / 2) - cam.right.y * (canvas.width / 2);
+    const tlcZ = cam.forward.z * fov + cam.up.z * (canvas.height / 2) - cam.right.z * (canvas.width / 2);
+
+    // ray direction for the pixel
+    const rayX = tlcX + cam.right.x * x - cam.up.x * y;
+    const rayY = tlcY + cam.right.y * x - cam.up.y * y;
+    const rayZ = tlcZ + cam.right.z * x - cam.up.z * y;
+    // normalize
+    const len = Math.sqrt(rayX * rayX + rayY * rayY + rayZ * rayZ);
+    const rayDir = {
+      x: rayX / len,
+      y: rayY / len,
+      z: rayZ / len,
+    };
+
+    return {
+      x: cam.position.x + depth * rayDir.x,
+      y: cam.position.y + depth * rayDir.y,
+      z: cam.position.z + depth * rayDir.z,
+    };
   }
 }
