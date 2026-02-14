@@ -61,7 +61,7 @@ struct SceneSettings {
 };
 
 struct PassResults {
-    center_depth: f32,
+    query_depth: f32,
 }
 
 //helper structs:
@@ -560,8 +560,8 @@ fn trace_path(cam_ray: Ray) -> vec3f
         }
 
         if(bounce == 0 && save_depth_data)
-        {//save depth data for the center pixel
-            results.center_depth = hit.distance;
+        {//save depth data for the queried pixel
+            results.query_depth = hit.distance;
         }
 
         let hit_object = scene_objects[hit.object_index];

@@ -91,7 +91,8 @@ export function setupCameraControls(renderer, canvas) {
 
     if (isLeftDragging || isRightDragging) {
       renderer.invalidateAccumulation();
-      renderer.getCenterDepth().then((depth) => {
+      // Query depth at center of screen to adjust movement speed
+      renderer.getDepthAt(renderer.canvas.width / 2, renderer.canvas.height / 2).then((depth) => {
         if (depth) relativeMoveSpeed = Math.min(1.0, Math.max(0.00001, depth));
       });
     }

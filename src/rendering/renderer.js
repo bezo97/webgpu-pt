@@ -23,7 +23,7 @@ export class Renderer {
   targetFramerate = 60; //fps
   total_accumulation_steps = 0;
   workload_accumulation_steps = 1;
-  resultsBufferReadInProgress = false;
+  #pendingDepthQuery = null; // { x, y, promise, resolve }
 
   get canvas() {
     return this.#displayCanvas;
@@ -230,6 +230,12 @@ export class Renderer {
     await this.#device.queue.onSubmittedWorkDone();
     this.#frameCounter++;
 
+    if (this.#pendingDepthQuery) {
+      // set the pixel coords for requested depth query
+      const { x, y } = this.#pendingDepthQuery;
+      this.#updateQuerySettings(x, y);
+    }
+
     //update uniforms
     this.#updateSettingsBuffer();
     this.#device.queue.writeBuffer(
@@ -277,6 +283,14 @@ export class Renderer {
     this.#device.queue.submit([commandBuffer]);
 
     this.total_accumulation_steps += this.workload_accumulation_steps;
+
+    if (this.#pendingDepthQuery) {
+      // Resolve the requested depth query by reading from buffer
+      const depth = await this.#readDepthResult();
+      this.#pendingDepthQuery.resolve(depth);
+      this.#pendingDepthQuery = null;
+    }
+
     //next frame
     if (this.isRendering) requestAnimationFrame(this.#renderFrame);
   };
@@ -295,42 +309,50 @@ export class Renderer {
     this.total_accumulation_steps = 0;
   }
 
+  /**
+   * @param {number} x 0-1 horizontal coordinate for depth query
+   * @param {number} y 0-1 vertical coordinate for depth query
+   * @returns {Promise<number>} Promise resolved by the next renderFrame(), containing the depth at the specified screen coords
+   */
   async getDepthAt(x, y) {
-    if (!this.isRendering || this.resultsBufferReadInProgress) return Promise.resolve(undefined);
+    if (!this.isRendering) return null;
 
-    this.resultsBufferReadInProgress = true;
-
-    try {
-      // render 1 frame to save the
-      await this.#updateQuerySettings(x, y);
-      await this.#renderFrame();
-
-      // Copy resultsBuffer to resultsReadBuffer
-      const commandEncoder = this.#device.createCommandEncoder();
-      commandEncoder.copyBufferToBuffer(this.#resultsBuffer, 0, this.#resultsReadBuffer, 0, 1 * 4);
-      this.#device.queue.submit([commandEncoder.finish()]);
-
-      // Wait for GPU and read the depth value
-      await this.#resultsReadBuffer.mapAsync(GPUMapMode.READ, 0, 1 * 4);
-      const depthBufferCopy = this.#resultsReadBuffer.getMappedRange(0, 1 * 4).slice(0);
-      this.#resultsReadBuffer.unmap();
-
-      // disable depth capture
-      await this.#updateQuerySettings(-1, -1);
-
-      this.resultsBufferReadInProgress = false;
-      return Promise.resolve(new Float32Array(depthBufferCopy)[0]);
-    } catch (e) {
-      this.resultsBufferReadInProgress = false;
-      throw e;
+    // Check if same query is already pending
+    if (this.#pendingDepthQuery && this.#pendingDepthQuery.x === x && this.#pendingDepthQuery.y === y) {
+      return this.#pendingDepthQuery.promise;
     }
+
+    // Create new pending query
+    let resolve;
+    const promise = new Promise((r) => (resolve = r));
+    await this.#pendingDepthQuery?.promise; //wait for previous query to finish if exists
+    this.#pendingDepthQuery = { x, y, promise, resolve };
+
+    return promise; // next renderFrame will resolve the promise
   }
 
-  async #updateQuerySettings(query_pixel_x, query_pixel_y) {
+  async #readDepthResult() {
+    // Copy resultsBuffer to resultsReadBuffer
+    const commandEncoder = this.#device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(this.#resultsBuffer, 0, this.#resultsReadBuffer, 0, 1 * 4);
+    this.#device.queue.submit([commandEncoder.finish()]);
+
+    // Wait for GPU and read the depth value
+    await this.#resultsReadBuffer.mapAsync(GPUMapMode.READ, 0, 1 * 4);
+    const depthBufferCopy = this.#resultsReadBuffer.getMappedRange(0, 1 * 4).slice(0);
+    this.#resultsReadBuffer.unmap();
+
+    // disable depth capture
+    this.#updateQuerySettings(-1.0, -1.0);
+
+    return new Float32Array(depthBufferCopy)[0];
+  }
+
+  #updateQuerySettings(query_pixel_x, query_pixel_y) {
     this.#device.queue.writeBuffer(this.#querySettingsBuffer, 0, new Float32Array([query_pixel_x, query_pixel_y]));
   }
 
-  async #updateSettingsBuffer() {
+  #updateSettingsBuffer() {
     const scene = this.scene;
     this.#device.queue.writeBuffer(
       this.#settingsBuffer,
