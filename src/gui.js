@@ -124,6 +124,35 @@ export default function createGUI(containerElement, renderer) {
       } else {
         console.log("No depth data available at clicked position");
       }
+    } else if (clickAction === "focus") {
+      const canvas = renderer.canvas;
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const depth = await renderer.getDepthAt(x, y);
+      if (depth !== undefined && depth > 0) {
+        // Set focus distance to the depth at clicked position
+        renderer.scene.settings.cam.focus_distance = depth;
+
+        // Deactivate click-to-focus
+        clickAction = null;
+
+        if (setFocusButton) {
+          setFocusButton.title = "🎯 Set from canvas";
+          setFocusButton.label = "focus";
+        }
+
+        // Refresh the camera pane to update the focus_distance slider
+        cameraPane.refresh();
+
+        renderer.invalidateAccumulation();
+        // Ensure rendering continues after accumulation is reset
+        if (!renderer.isRendering) {
+          renderer.startRendering();
+        }
+      } else {
+        console.log("No depth data available at clicked position");
+      }
     }
   });
 
@@ -151,6 +180,27 @@ export default function createGUI(containerElement, renderer) {
   cameraPane.addBinding(renderer.scene.settings.cam, "focus_distance", {
     min: 0,
     max: 10,
+  });
+
+  // Store reference to the set focus button for button reset
+  let setFocusButton = null;
+
+  const setFocusFromCanvasButton = cameraPane.addButton({
+    title: "🎯 Set from canvas",
+    label: "focus",
+  });
+  setFocusFromCanvasButton.on("click", () => {
+    if (clickAction === "focus") {
+      clickAction = null;
+      setFocusButton = null;
+      setFocusFromCanvasButton.title = "🎯 Set from canvas";
+      setFocusFromCanvasButton.label = "focus";
+    } else {
+      clickAction = "focus";
+      setFocusButton = setFocusFromCanvasButton;
+      setFocusFromCanvasButton.title = "❌ Cancel focus setting";
+      setFocusFromCanvasButton.label = "focus";
+    }
   });
   cameraPane
     .addButton({
