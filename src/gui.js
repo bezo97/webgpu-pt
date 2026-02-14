@@ -8,7 +8,7 @@ export default function createGUI(containerElement, renderer) {
   });
 
   let selectedObjectIndex = null;
-  // Represents what the next click on the canvas will do (select, setPosition, lookAt, etc.)
+  // Represents what the next click on the canvas will do (select, setPosition, lookAt, focus, etc.)
   let clickAction = null;
 
   const startStopButton = pane
