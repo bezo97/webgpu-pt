@@ -1,340 +1,402 @@
 import { Pane } from "https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js";
+import { MoveTool } from "./gui/moveTool.js";
+import { ZoomTool } from "./gui/zoomTool.js";
 
-export default function createGUI(containerElement, renderer) {
-  const pane = new Pane({
-    container: containerElement,
-    title: "WebGPU-pt",
-    expanded: true,
-  });
+export default class GUI {
+  constructor(containerElement, renderer) {
+    this.containerElement = containerElement;
+    this.renderer = renderer;
+    this.pane = null;
+    this.tools = [];
+    this.activeTool = null;
+    this.selectedObjectIndex = null;
+    this.clickAction = null;
+    this.currentObjectEditorPane = null;
+    this.currentSetPositionButton = null;
+    this.setFocusButton = null;
+    this.cameraPane = null;
+  }
 
-  let selectedObjectIndex = null;
-  // Represents what the next click on the canvas will do (select, setPosition, lookAt, focus, etc.)
-  let clickAction = null;
+  initialize = () => {
+    this.pane = new Pane({
+      container: this.containerElement,
+      title: "WebGPU-pt",
+      expanded: true,
+    });
 
-  const startStopButton = pane
-    .addButton({
+    // init tools
+    this.tools = [new MoveTool(this.renderer), new ZoomTool(this.renderer)];
+    for (const tool of this.tools) {
+      tool.createGUI(this.pane, () => this.activateTool(tool));
+    }
+
+    // setup canvas event handlers
+    this.tools.forEach((tool) => {
+      this.renderer.canvas.addEventListener("mousedown", tool.onMouseDown);
+      this.renderer.canvas.addEventListener("mouseup", tool.onMouseUp);
+      this.renderer.canvas.addEventListener("mousemove", tool.onMouseMove);
+    });
+    // prevent context menu whenever a tool is active
+    this.renderer.canvas.addEventListener("contextmenu", (event) => {
+      if (this.activeTool) {
+        event.preventDefault();
+      }
+    });
+
+    // Setup click-to-position/focus
+    this.setupClickToPosition();
+
+    // Setup render settings
+    this.setupRenderSettings();
+
+    // Setup scene settings
+    this.setupSceneSettings();
+
+    // Activate the initial tool (move tool)
+    this.activateTool(this.tools[0]);
+  };
+
+  activateTool = (tool) => {
+    const currentTool = this.activeTool;
+
+    if (currentTool) {
+      currentTool.deactivate();
+      this.activeTool = null;
+    }
+
+    if (tool === currentTool) {
+      return; // just deactivate the selected tool
+    }
+
+    // Activate the new tool
+    this.activeTool = tool;
+    this.activeTool.activate(null);
+  };
+
+  setupClickToPosition = () => {
+    this.renderer.canvas.addEventListener("click", async (event) => {
+      if (this.selectedObjectIndex !== null && this.clickAction === "position") {
+        const canvas = this.renderer.canvas;
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        const depth = await this.renderer.getDepthAt(x, y);
+        if (depth !== undefined && depth > 0) {
+          const worldPos = this.renderer.screenToWorld(x, y, depth);
+          this.renderer.scene.objects[this.selectedObjectIndex].position = worldPos;
+
+          // Deactivate click-to-position
+          this.selectedObjectIndex = null;
+          this.clickAction = null;
+
+          if (this.currentSetPositionButton) {
+            this.currentSetPositionButton.title = "🎯 Set from canvas";
+            this.currentSetPositionButton.label = "position";
+            this.currentSetPositionButton = null;
+          }
+
+          if (this.currentObjectEditorPane) {
+            this.currentObjectEditorPane.refresh();
+          }
+
+          this.renderer.invalidateAccumulation();
+          if (!this.renderer.isRendering) {
+            this.renderer.startRendering();
+          }
+        } else {
+          console.log("No depth data available at clicked position");
+        }
+      } else if (this.clickAction === "focus") {
+        const canvas = this.renderer.canvas;
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        const depth = await this.renderer.getDepthAt(x, y);
+        if (depth !== undefined && depth > 0) {
+          this.renderer.scene.settings.cam.focus_distance = depth;
+
+          // Deactivate click-to-focus
+          this.clickAction = null;
+
+          if (this.setFocusButton) {
+            this.setFocusButton.title = "🎯 Set from canvas";
+            this.setFocusButton.label = "focus";
+            this.setFocusButton = null;
+          }
+
+          this.cameraPane.refresh();
+
+          this.renderer.invalidateAccumulation();
+          if (!this.renderer.isRendering) {
+            this.renderer.startRendering();
+          }
+        } else {
+          throw new Error("No depth data available at clicked position");
+        }
+      }
+    });
+  };
+
+  setupRenderSettings = () => {
+    const startStopButton = this.pane.addButton({
       title: "⏸️",
       label: "Start/Stop",
-    })
-    .on("click", () => {
-      if (renderer.isRendering) renderer.stopRendering();
-      else renderer.startRendering();
-      startStopButton.title = renderer.isRendering ? "⏸️" : "▶️";
     });
-  pane.addBinding(renderer, "isRendering", {
-    readonly: true,
-  });
-  pane.addBinding(renderer, "targetFramerate", {
-    min: 1,
-    max: 60,
-    step: 1,
-  });
-  pane.addBinding(renderer, "workload_accumulation_steps", {
-    label: "Workload size",
-    readonly: true,
-    format: (v) => v.toFixed(0) + " steps",
-  });
-  pane.addBinding(renderer, "total_accumulation_steps", {
-    label: "Total accumulation",
-    readonly: true,
-    format: (v) => v.toFixed(0) + " steps",
-  });
-  pane.addBinding(renderer, "framerate", {
-    readonly: true,
-    format: (v) => v.toFixed(0) + " FPS",
-  });
-  pane.addBinding(renderer, "framerate", {
-    readonly: true,
-    view: "graph",
-    min: 0,
-    max: 61,
-  });
-
-  pane.addBlade({
-    view: "separator",
-  });
-
-  const renderSettingsPane = pane.addFolder({
-    title: "Render settings",
-    expanded: false,
-  });
-  renderSettingsPane.on("change", (a) => {
-    renderer.invalidateAccumulation();
-  });
-
-  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "max_bounces", {
-    min: 1,
-    max: 20,
-    step: 1,
-  });
-  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "russian_roulette_start_bounce", {
-    min: 1,
-    max: 20,
-    step: 1,
-  });
-  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "russian_roulette_min_p_reflect", {
-    min: 0,
-    max: 1,
-    step: 0.01,
-  });
-  renderSettingsPane.addBinding(renderer.scene.settings.render_settings, "russian_roulette_min_p_refract", {
-    min: 0,
-    max: 1,
-    step: 0.01,
-  });
-
-  const sceneSettingsPane = pane.addFolder({
-    title: "Scene",
-    expanded: true,
-  });
-  sceneSettingsPane.on("change", (a) => {
-    renderer.invalidateAccumulation();
-  });
-
-  // Store references to current object editor pane and button for button reset
-  let currentObjectEditorPane = null;
-  let currentSetPositionButton = null;
-
-  renderer.canvas.addEventListener("click", async (event) => {
-    if (selectedObjectIndex !== null && clickAction === "position") {
-      const canvas = renderer.canvas;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      const depth = await renderer.getDepthAt(x, y);
-      if (depth !== undefined && depth > 0) {
-        const worldPos = renderer.screenToWorld(x, y, depth);
-        renderer.scene.objects[selectedObjectIndex].position = worldPos;
-
-        // Deactivate click-to-position
-        selectedObjectIndex = null;
-        clickAction = null;
-
-        if (currentSetPositionButton) {
-          currentSetPositionButton.title = "🎯 Set from canvas";
-          currentSetPositionButton.label = "position";
-        }
-        currentObjectEditorPane?.refresh();
-
-        renderer.invalidateAccumulation();
-        // Ensure rendering continues after accumulation is reset
-        if (!renderer.isRendering) {
-          renderer.startRendering();
-        }
-      } else {
-        console.log("No depth data available at clicked position");
-      }
-    } else if (clickAction === "focus") {
-      const canvas = renderer.canvas;
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      const depth = await renderer.getDepthAt(x, y);
-      if (depth !== undefined && depth > 0) {
-        // Set focus distance to the depth at clicked position
-        renderer.scene.settings.cam.focus_distance = depth;
-
-        // Deactivate click-to-focus
-        clickAction = null;
-
-        if (setFocusButton) {
-          setFocusButton.title = "🎯 Set from canvas";
-          setFocusButton.label = "focus";
-        }
-
-        // Refresh the camera pane to update the focus_distance slider
-        cameraPane.refresh();
-
-        renderer.invalidateAccumulation();
-        // Ensure rendering continues after accumulation is reset
-        if (!renderer.isRendering) {
-          renderer.startRendering();
-        }
-      } else {
-        console.log("No depth data available at clicked position");
-      }
-    }
-  });
-
-  sceneSettingsPane.addBinding(renderer.scene.settings, "sky_color", {
-    view: "color",
-    picker: "inline",
-    expanded: false,
-    color: { type: "float", alpha: false },
-  });
-
-  const cameraPane = sceneSettingsPane.addFolder({
-    title: "Camera",
-    expanded: false,
-  });
-  cameraPane.addBinding(renderer.scene.settings.cam, "fov_angle", {
-    label: "Field of view (degrees)",
-    min: 1,
-    max: 120,
-  });
-  cameraPane.addBinding(renderer.scene.settings.cam, "dof_size", {
-    label: "Depth of field size",
-    min: 0,
-    max: 0.2,
-  });
-  cameraPane.addBinding(renderer.scene.settings.cam, "focus_distance", {
-    min: 0,
-    max: 10,
-  });
-
-  // Store reference to the set focus button for button reset
-  let setFocusButton = null;
-
-  const setFocusFromCanvasButton = cameraPane.addButton({
-    title: "🎯 Set from canvas",
-    label: "focus",
-  });
-  setFocusFromCanvasButton.on("click", () => {
-    if (clickAction === "focus") {
-      clickAction = null;
-      setFocusButton = null;
-      setFocusFromCanvasButton.title = "🎯 Set from canvas";
-      setFocusFromCanvasButton.label = "focus";
-    } else {
-      clickAction = "focus";
-      setFocusButton = setFocusFromCanvasButton;
-      setFocusFromCanvasButton.title = "❌ Cancel focus setting";
-      setFocusFromCanvasButton.label = "focus";
-    }
-  });
-  cameraPane
-    .addButton({
-      title: "⟲",
-      label: "Reset",
-    })
-    .on("click", () => {
-      renderer.scene.settings.cam.position = { x: 0.0, y: 1.0, z: -5.0 };
-      renderer.scene.settings.cam.right = { x: 1.0, y: 0.0, z: 0.0 };
-      renderer.scene.settings.cam.up = { x: 0.0, y: 1.0, z: 0.0 };
-      renderer.scene.settings.cam.forward = { x: 0.0, y: 0.0, z: 1.0 };
-      renderer.invalidateAccumulation();
+    startStopButton.on("click", () => {
+      if (this.renderer.isRendering) this.renderer.stopRendering();
+      else this.renderer.startRendering();
+      startStopButton.title = this.renderer.isRendering ? "⏸️" : "▶️";
+    });
+    this.pane.addBinding(this.renderer, "isRendering", {
+      readonly: true,
+    });
+    this.pane.addBinding(this.renderer, "targetFramerate", {
+      min: 1,
+      max: 60,
+      step: 1,
+    });
+    this.pane.addBinding(this.renderer, "workload_accumulation_steps", {
+      label: "Workload size",
+      readonly: true,
+      format: (v) => v.toFixed(0) + " steps",
+    });
+    this.pane.addBinding(this.renderer, "total_accumulation_steps", {
+      label: "Total accumulation",
+      readonly: true,
+      format: (v) => v.toFixed(0) + " steps",
+    });
+    this.pane.addBinding(this.renderer, "framerate", {
+      readonly: true,
+      format: (v) => v.toFixed(0) + " FPS",
+    });
+    this.pane.addBinding(this.renderer, "framerate", {
+      readonly: true,
+      view: "graph",
+      min: 0,
+      max: 61,
     });
 
-  const tab = sceneSettingsPane.addTab({
-    pages: [{ title: "Objects" }, { title: "Materials" }],
-  });
-  tab.on("change", (a) => {
-    renderer.invalidateAccumulation();
-  });
-  const objectsPane = tab.pages[0];
-  const materialsPane = tab.pages[1];
+    this.pane.addBlade({
+      view: "separator",
+    });
 
-  const addObjectButton = objectsPane
-    .addButton({
-      title: "+",
-      label: "Add object",
-    })
-    .on("click", () => {});
-
-  let material_options = {};
-  for (let i = 0; i < renderer.scene.materials.length; i++) material_options[renderer.scene.materials[i].name] = i;
-
-  for (const obj of renderer.scene.objects) {
-    const objectEditorPane = objectsPane.addFolder({
-      title: "object",
+    const renderSettingsPane = this.pane.addFolder({
+      title: "Render settings",
       expanded: false,
     });
-
-    objectEditorPane.addBinding(obj, "object_type", {
-      options: {
-        sphere: 0,
-        fractal: 1,
-      },
+    renderSettingsPane.on("change", () => {
+      this.renderer.invalidateAccumulation();
     });
 
-    objectEditorPane.addBinding(obj, "material_index", {
-      label: "Material",
-      options: material_options,
+    renderSettingsPane.addBinding(this.renderer.scene.settings.render_settings, "max_bounces", {
+      min: 1,
+      max: 20,
+      step: 1,
     });
-
-    objectEditorPane.addBinding(obj, "position", {
-      picker: "inline",
-      expanded: true,
-      x: { min: -10, max: 10 },
-      y: { min: -10, max: 10 },
-      z: { min: -10, max: 10 },
+    renderSettingsPane.addBinding(this.renderer.scene.settings.render_settings, "russian_roulette_start_bounce", {
+      min: 1,
+      max: 20,
+      step: 1,
     });
-
-    objectEditorPane.addBinding(obj, "scale", {
+    renderSettingsPane.addBinding(this.renderer.scene.settings.render_settings, "russian_roulette_min_p_reflect", {
       min: 0,
-      max: 5,
+      max: 1,
+      step: 0.01,
+    });
+    renderSettingsPane.addBinding(this.renderer.scene.settings.render_settings, "russian_roulette_min_p_refract", {
+      min: 0,
+      max: 1,
+      step: 0.01,
+    });
+  };
+
+  setupSceneSettings = () => {
+    const sceneSettingsPane = this.pane.addFolder({
+      title: "Scene",
+      expanded: true,
+    });
+    sceneSettingsPane.on("change", () => {
+      this.renderer.invalidateAccumulation();
     });
 
-    const setPositionFromCanvasButton = objectEditorPane.addButton({
+    sceneSettingsPane.addBinding(this.renderer.scene.settings, "sky_color", {
+      view: "color",
+      picker: "inline",
+      expanded: false,
+      color: { type: "float", alpha: false },
+    });
+
+    this.cameraPane = sceneSettingsPane.addFolder({
+      title: "Camera",
+      expanded: false,
+    });
+    this.cameraPane.addBinding(this.renderer.scene.settings.cam, "fov_angle", {
+      label: "Field of view (degrees)",
+      min: 1,
+      max: 120,
+    });
+    this.cameraPane.addBinding(this.renderer.scene.settings.cam, "dof_size", {
+      label: "Depth of field size",
+      min: 0,
+      max: 0.2,
+    });
+    this.cameraPane.addBinding(this.renderer.scene.settings.cam, "focus_distance", {
+      min: 0,
+      max: 10,
+    });
+
+    const setFocusFromCanvasButton = this.cameraPane.addButton({
       title: "🎯 Set from canvas",
-      label: "position",
+      label: "focus",
     });
-    setPositionFromCanvasButton.on("click", () => {
-      if (clickAction === "position") {
-        clickAction = null;
-        currentObjectEditorPane = null;
-        currentSetPositionButton = null;
-        selectedObjectIndex = null;
-        setPositionFromCanvasButton.title = "🎯 Set from canvas";
-        setPositionFromCanvasButton.label = "position";
+    setFocusFromCanvasButton.on("click", () => {
+      if (this.clickAction === "focus") {
+        this.clickAction = null;
+        this.setFocusButton = null;
+        setFocusFromCanvasButton.title = "🎯 Set from canvas";
+        setFocusFromCanvasButton.label = "focus";
       } else {
-        clickAction = "position";
-        currentObjectEditorPane = objectEditorPane;
-        currentSetPositionButton = setPositionFromCanvasButton;
-        selectedObjectIndex = renderer.scene.objects.indexOf(obj);
-        setPositionFromCanvasButton.title = "❌ Cancel positioning";
-        setPositionFromCanvasButton.label = "position";
+        this.clickAction = "focus";
+        this.setFocusButton = setFocusFromCanvasButton;
+        setFocusFromCanvasButton.title = "❌ Cancel focus setting";
+        setFocusFromCanvasButton.label = "focus";
       }
     });
+    this.cameraPane
+      .addButton({
+        title: "⟲",
+        label: "Reset",
+      })
+      .on("click", () => {
+        this.renderer.scene.settings.cam.position = { x: 0.0, y: 1.0, z: -5.0 };
+        this.renderer.scene.settings.cam.right = { x: 1.0, y: 0.0, z: 0.0 };
+        this.renderer.scene.settings.cam.up = { x: 0.0, y: 1.0, z: 0.0 };
+        this.renderer.scene.settings.cam.forward = { x: 0.0, y: 0.0, z: 1.0 };
+        this.renderer.invalidateAccumulation();
+      });
 
-    const deleteObjectButton = objectEditorPane.addButton({
-      title: "🗑",
-      label: "Delete object",
+    const tab = sceneSettingsPane.addTab({
+      pages: [{ title: "Objects" }, { title: "Materials" }],
     });
-    deleteObjectButton.on("click", () => {});
-  }
+    tab.on("change", () => {
+      this.renderer.invalidateAccumulation();
+    });
+    const objectsPane = tab.pages[0];
+    const materialsPane = tab.pages[1];
 
-  const addMaterialButton = materialsPane
-    .addButton({
-      title: "+",
-      label: "Add material",
-    })
-    .on("click", () => {});
+    objectsPane
+      .addButton({
+        title: "+",
+        label: "Add object",
+      })
+      .on("click", () => {});
 
-  for (const mat of renderer.scene.materials) {
-    const materialEditorPane = materialsPane.addFolder({
-      title: mat.name,
-      expanded: false,
-    });
+    let material_options = {};
+    for (let i = 0; i < this.renderer.scene.materials.length; i++) material_options[this.renderer.scene.materials[i].name] = i;
 
-    materialEditorPane.addBinding(mat, "material_type", {
-      options: {
-        diffuse: 0,
-        reflective: 1,
-        refractive: 2,
-      },
-    });
+    for (const obj of this.renderer.scene.objects) {
+      const objectEditorPane = objectsPane.addFolder({
+        title: "object",
+        expanded: false,
+      });
 
-    materialEditorPane.addBinding(mat, "albedo", {
-      view: "color",
-      picker: "inline",
-      expanded: true,
-      color: { type: "float", alpha: false },
-    });
+      objectEditorPane.addBinding(obj, "object_type", {
+        options: {
+          sphere: 0,
+          fractal: 1,
+        },
+      });
 
-    materialEditorPane.addBinding(mat, "emission", {
-      view: "color",
-      picker: "inline",
-      expanded: true,
-      color: { type: "float", alpha: false },
-    });
-    materialEditorPane.addBinding(mat, "roughness", {
-      min: 0,
-      max: 1,
-    });
-    materialEditorPane.addBinding(mat, "metallic", {
-      min: 0,
-      max: 1,
-    });
-  }
+      objectEditorPane.addBinding(obj, "material_index", {
+        label: "Material",
+        options: material_options,
+      });
+
+      objectEditorPane.addBinding(obj, "position", {
+        picker: "inline",
+        expanded: true,
+        x: { min: -10, max: 10 },
+        y: { min: -10, max: 10 },
+        z: { min: -10, max: 10 },
+      });
+
+      objectEditorPane.addBinding(obj, "scale", {
+        min: 0,
+        max: 5,
+      });
+
+      const setPositionFromCanvasButton = objectEditorPane.addButton({
+        title: "🎯 Set from canvas",
+        label: "position",
+      });
+      setPositionFromCanvasButton.on("click", () => {
+        if (this.clickAction === "position") {
+          this.clickAction = null;
+          this.currentObjectEditorPane = null;
+          this.currentSetPositionButton = null;
+          this.selectedObjectIndex = null;
+          setPositionFromCanvasButton.title = "🎯 Set from canvas";
+          setPositionFromCanvasButton.label = "position";
+        } else {
+          this.clickAction = "position";
+          this.currentObjectEditorPane = objectEditorPane;
+          this.currentSetPositionButton = setPositionFromCanvasButton;
+          this.selectedObjectIndex = this.renderer.scene.objects.indexOf(obj);
+          setPositionFromCanvasButton.title = "❌ Cancel positioning";
+          setPositionFromCanvasButton.label = "position";
+        }
+      });
+
+      objectEditorPane
+        .addButton({
+          title: "🗑",
+          label: "Delete object",
+        })
+        .on("click", () => {});
+    }
+
+    materialsPane
+      .addButton({
+        title: "+",
+        label: "Add material",
+      })
+      .on("click", () => {});
+
+    for (const mat of this.renderer.scene.materials) {
+      const materialEditorPane = materialsPane.addFolder({
+        title: mat.name,
+        expanded: false,
+      });
+
+      materialEditorPane.addBinding(mat, "material_type", {
+        options: {
+          diffuse: 0,
+          reflective: 1,
+          refractive: 2,
+        },
+      });
+
+      materialEditorPane.addBinding(mat, "albedo", {
+        view: "color",
+        picker: "inline",
+        expanded: true,
+        color: { type: "float", alpha: false },
+      });
+
+      materialEditorPane.addBinding(mat, "emission", {
+        view: "color",
+        picker: "inline",
+        expanded: true,
+        color: { type: "float", alpha: false },
+      });
+      materialEditorPane.addBinding(mat, "roughness", {
+        min: 0,
+        max: 1,
+      });
+      materialEditorPane.addBinding(mat, "metallic", {
+        min: 0,
+        max: 1,
+      });
+    }
+  };
 }

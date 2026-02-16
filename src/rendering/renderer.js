@@ -310,8 +310,8 @@ export class Renderer {
   }
 
   /**
-   * @param {number} x 0-1 horizontal coordinate for depth query
-   * @param {number} y 0-1 vertical coordinate for depth query
+   * @param {number} x 0-canvasWidth horizontal coordinate for depth query
+   * @param {number} y 0-canvasHeight vertical coordinate for depth query
    * @returns {Promise<number>} Promise resolved by the next renderFrame(), containing the depth at the specified screen coords
    */
   async getDepthAt(x, y) {
@@ -390,8 +390,8 @@ export class Renderer {
   }
 
   /**
-   * @param {number} x 0-1 normalized screen coordinates
-   * @param {number} y 0-1 normalized screen coordinates
+   * @param {number} x 0-canvasWidth horizontal coordinate for depth query
+   * @param {number} y 0-canvasHeight vertical coordinate for depth query
    * @param {number} depth depth value at the pixel, as returned by getDepthAt()
    * @returns {{x: number, y: number, z: number}} world position at specified screen coordinates and depth
    */
