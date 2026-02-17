@@ -1,6 +1,6 @@
 import { Pane } from "https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js";
-import { MoveTool } from "./gui/moveTool.js";
-import { ZoomTool } from "./gui/zoomTool.js";
+import { MoveTool } from "./moveTool.js";
+import { ZoomTool } from "./zoomTool.js";
 
 export default class GUI {
   constructor(mainPaneContainer, toolsPaneContainer, renderer) {

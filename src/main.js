@@ -1,6 +1,6 @@
 import defaultScene from "./defaultScene.js";
 import { Renderer } from "./rendering/renderer.js";
-import GUI from "./gui.js";
+import GUI from "./gui/gui.js";
 
 const canvas = document.getElementById("main_display");
 const sidepanel = document.getElementById("sidepanel");
