@@ -3,10 +3,12 @@ import { MoveTool } from "./gui/moveTool.js";
 import { ZoomTool } from "./gui/zoomTool.js";
 
 export default class GUI {
-  constructor(containerElement, renderer) {
-    this.containerElement = containerElement;
+  constructor(mainPaneContainer, toolsPaneContainer, renderer) {
+    this.mainPaneContainer = mainPaneContainer;
+    this.toolsPaneContainer = toolsPaneContainer;
     this.renderer = renderer;
-    this.pane = null;
+    this.mainPane = null;
+    this.toolsPane = null;
     this.tools = [];
     this.activeTool = null;
     this.selectedObjectIndex = null;
@@ -18,24 +20,24 @@ export default class GUI {
   }
 
   initialize = () => {
-    this.pane = new Pane({
-      container: this.containerElement,
+    this.mainPane = new Pane({
+      container: this.mainPaneContainer,
       title: "WebGPU-pt",
       expanded: true,
     });
 
+    this.toolsPane = new Pane({
+      container: this.toolsPaneContainer,
+      title: "Tools",
+      expanded: true,
+    });
+
     // init tools
-    this.tools = [new MoveTool(this.renderer), new ZoomTool(this.renderer)];
+    this.tools = [new ZoomTool(this.renderer), new MoveTool(this.renderer)];
     for (const tool of this.tools) {
-      tool.createGUI(this.pane, () => this.activateTool(tool));
+      tool.createGUI(this.toolsPane, () => this.activateTool(tool));
     }
 
-    // setup canvas event handlers
-    this.tools.forEach((tool) => {
-      this.renderer.canvas.addEventListener("mousedown", tool.onMouseDown);
-      this.renderer.canvas.addEventListener("mouseup", tool.onMouseUp);
-      this.renderer.canvas.addEventListener("mousemove", tool.onMouseMove);
-    });
     // prevent context menu whenever a tool is active
     this.renderer.canvas.addEventListener("contextmenu", (event) => {
       if (this.activeTool) {
@@ -52,7 +54,7 @@ export default class GUI {
     // Setup scene settings
     this.setupSceneSettings();
 
-    // Activate the initial tool (move tool)
+    // Activate the initial tool
     this.activateTool(this.tools[0]);
   };
 
@@ -138,7 +140,7 @@ export default class GUI {
   };
 
   setupRenderSettings = () => {
-    const startStopButton = this.pane.addButton({
+    const startStopButton = this.mainPane.addButton({
       title: "⏸️",
       label: "Start/Stop",
     });
@@ -147,40 +149,40 @@ export default class GUI {
       else this.renderer.startRendering();
       startStopButton.title = this.renderer.isRendering ? "⏸️" : "▶️";
     });
-    this.pane.addBinding(this.renderer, "isRendering", {
+    this.mainPane.addBinding(this.renderer, "isRendering", {
       readonly: true,
     });
-    this.pane.addBinding(this.renderer, "targetFramerate", {
+    this.mainPane.addBinding(this.renderer, "targetFramerate", {
       min: 1,
       max: 60,
       step: 1,
     });
-    this.pane.addBinding(this.renderer, "workload_accumulation_steps", {
+    this.mainPane.addBinding(this.renderer, "workload_accumulation_steps", {
       label: "Workload size",
       readonly: true,
       format: (v) => v.toFixed(0) + " steps",
     });
-    this.pane.addBinding(this.renderer, "total_accumulation_steps", {
+    this.mainPane.addBinding(this.renderer, "total_accumulation_steps", {
       label: "Total accumulation",
       readonly: true,
       format: (v) => v.toFixed(0) + " steps",
     });
-    this.pane.addBinding(this.renderer, "framerate", {
+    this.mainPane.addBinding(this.renderer, "framerate", {
       readonly: true,
       format: (v) => v.toFixed(0) + " FPS",
     });
-    this.pane.addBinding(this.renderer, "framerate", {
+    this.mainPane.addBinding(this.renderer, "framerate", {
       readonly: true,
       view: "graph",
       min: 0,
       max: 61,
     });
 
-    this.pane.addBlade({
+    this.mainPane.addBlade({
       view: "separator",
     });
 
-    const renderSettingsPane = this.pane.addFolder({
+    const renderSettingsPane = this.mainPane.addFolder({
       title: "Render settings",
       expanded: false,
     });
@@ -211,7 +213,7 @@ export default class GUI {
   };
 
   setupSceneSettings = () => {
-    const sceneSettingsPane = this.pane.addFolder({
+    const sceneSettingsPane = this.mainPane.addFolder({
       title: "Scene",
       expanded: true,
     });
@@ -238,7 +240,8 @@ export default class GUI {
     this.cameraPane.addBinding(this.renderer.scene.settings.cam, "dof_size", {
       label: "Depth of field size",
       min: 0,
-      max: 0.2,
+      max: 0.1,
+      step: 0.0001,
     });
     this.cameraPane.addBinding(this.renderer.scene.settings.cam, "focus_distance", {
       min: 0,
@@ -322,7 +325,7 @@ export default class GUI {
 
       objectEditorPane.addBinding(obj, "scale", {
         min: 0,
-        max: 5,
+        max: 15,
       });
 
       const setPositionFromCanvasButton = objectEditorPane.addButton({

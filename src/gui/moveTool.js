@@ -40,9 +40,19 @@ export class MoveTool {
       lastMouseY: 0,
     };
     this.updateButtonState();
+
+    this.renderer.canvas.addEventListener("mousedown", this.onMouseDown);
+    this.renderer.canvas.addEventListener("mouseup", this.onMouseUp);
+    this.renderer.canvas.addEventListener("mousemove", this.onMouseMove);
+
+    this.renderer.canvas.style.cursor = "grab";
   }
 
   deactivate() {
+    this.renderer.canvas.removeEventListener("mousedown", this.onMouseDown);
+    this.renderer.canvas.removeEventListener("mouseup", this.onMouseUp);
+    this.renderer.canvas.removeEventListener("mousemove", this.onMouseMove);
+
     this.#isActive = false;
     this.dragState = {
       isLeftDragging: false,
@@ -51,6 +61,7 @@ export class MoveTool {
       lastMouseY: 0,
     };
     this.updateButtonState();
+    this.renderer.canvas.style.cursor = undefined; //reset to default
   }
 
   /**
@@ -67,11 +78,13 @@ export class MoveTool {
     if (event.button === 2) this.dragState.isRightDragging = true;
     this.dragState.lastMouseX = event.clientX;
     this.dragState.lastMouseY = event.clientY;
+    this.renderer.canvas.style.cursor = "none"; // hide cursor while dragging
   };
 
   onMouseUp = (event) => {
     if (event.button === 0) this.dragState.isLeftDragging = false;
     if (event.button === 2) this.dragState.isRightDragging = false;
+    this.renderer.canvas.style.cursor = "grab";
   };
 
   onMouseMove = (event) => {

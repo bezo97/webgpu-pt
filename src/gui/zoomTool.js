@@ -35,6 +35,11 @@ export class ZoomTool {
     if (this.#isActive) return;
     this.#isActive = true;
     this.updateButtonState();
+
+    this.renderer.canvas.addEventListener("mousedown", this.onMouseDown);
+    this.renderer.canvas.addEventListener("mouseup", this.onMouseUp);
+    this.renderer.canvas.addEventListener("mousemove", this.onMouseMove);
+    this.renderer.canvas.style.cursor = "crosshair";
   }
 
   deactivate() {
@@ -43,8 +48,14 @@ export class ZoomTool {
       this.#animationHandle.cancel();
       this.#animationHandle = null;
     }
+
+    this.renderer.canvas.removeEventListener("mousedown", this.onMouseDown);
+    this.renderer.canvas.removeEventListener("mouseup", this.onMouseUp);
+    this.renderer.canvas.removeEventListener("mousemove", this.onMouseMove);
+
     this.#isActive = false;
     this.updateButtonState();
+    this.renderer.canvas.style.cursor = undefined; // reset to default
   }
 
   /**
@@ -113,7 +124,7 @@ export class ZoomTool {
         currentCam.right = { ...currentState.right };
         currentCam.up = { ...currentState.up };
         currentCam.focus_distance = currentState.focus_distance;
-        currentCam.dof_size = currentCam.focus_distance * 0.05;
+        currentCam.dof_size = currentCam.focus_distance * 0.02;
 
         this.#animationHandle.requestId = requestAnimationFrame(animate);
       } else {
@@ -123,7 +134,7 @@ export class ZoomTool {
         currentCam.right = { ...endState.right };
         currentCam.up = { ...endState.up };
         currentCam.focus_distance = endState.focus_distance;
-        currentCam.dof_size = currentCam.focus_distance * 0.05;
+        currentCam.dof_size = currentCam.focus_distance * 0.02;
         this.#animationHandle = null;
       }
 

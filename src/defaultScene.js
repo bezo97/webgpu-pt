@@ -24,13 +24,13 @@ const objects = [
   {
     object_type: 1,
     material_index: 0,
-    position: { x: 0.0, y: 0.0, z: 0.0 },
-    scale: 3.75,
+    position: { x: 0.0, y: -0.19, z: 0.0 },
+    scale: 5.23,
   },
   {
     object_type: 0,
     material_index: 1,
-    position: { x: 1.0, y: 1.5, z: -1.75 },
+    position: { x: 1.0, y: 1.52, z: -2.94 },
     scale: 0.25,
   },
   {
