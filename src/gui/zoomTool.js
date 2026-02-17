@@ -113,6 +113,7 @@ export class ZoomTool {
         currentCam.right = { ...currentState.right };
         currentCam.up = { ...currentState.up };
         currentCam.focus_distance = currentState.focus_distance;
+        currentCam.dof_size = currentCam.focus_distance * 0.05;
 
         this.#animationHandle.requestId = requestAnimationFrame(animate);
       } else {
@@ -122,6 +123,7 @@ export class ZoomTool {
         currentCam.right = { ...endState.right };
         currentCam.up = { ...endState.up };
         currentCam.focus_distance = endState.focus_distance;
+        currentCam.dof_size = currentCam.focus_distance * 0.05;
         this.#animationHandle = null;
       }
 
