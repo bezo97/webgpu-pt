@@ -1,8 +1,19 @@
+const ANIMATION_DURATION = 0.1; // seconds
+
+// some common easing functions to choose from
+const easing = {
+  linear: (t) => t,
+  easeInOutCubic: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+};
+
 /**
- * Left-click to zoom to a point, right-click to zoom out
+ * Left-click to zoom to a point, right-click to zoom out.
+ * Includes smooth camera animation.
  */
 export class ZoomTool {
   #isActive = false;
+  #animationHandle = null; // { requestId: number | null; cancel: () => void } | null
+  #easingFunc = easing.easeInOutCubic;
 
   constructor(renderer) {
     this.renderer = renderer;
@@ -20,8 +31,33 @@ export class ZoomTool {
     this.toolButton.on("click", onButtonClick);
   }
 
+  activate() {
+    if (this.#isActive) return;
+    this.#isActive = true;
+    this.updateButtonState();
+  }
+
+  deactivate() {
+    // Cancel any ongoing animation
+    if (this.#animationHandle) {
+      this.#animationHandle.cancel();
+      this.#animationHandle = null;
+    }
+    this.#isActive = false;
+    this.updateButtonState();
+  }
+
+  /**
+   * Update the tool button title based on active state
+   */
+  updateButtonState = () => {
+    if (this.toolButton) {
+      this.toolButton.title = this.#isActive ? this.activeToolTitle : this.inactiveToolTitle;
+    }
+  };
+
   onMouseDown = async (event) => {
-    if (!this.#isActive) return;
+    if (!this.#isActive || this.#animationHandle) return;
 
     const rect = this.renderer.canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
@@ -32,29 +68,86 @@ export class ZoomTool {
       const depth = await this.renderer.getDepthAt(x, y);
       if (depth !== undefined && depth > 0) {
         const targetPoint = this.renderer.screenToWorld(x, y, depth);
-        this.zoomToTarget(targetPoint);
+        this.animateCamera(targetPoint);
       } else {
         console.log("No depth data available at clicked position");
       }
     } else if (event.button === 2) {
       // Right-click: zoom out
-      this.zoomOut();
+      this.animateCamera(undefined); // no target -> zoom out
     }
   };
 
   /**
-   * Zoom to target point (look at + move halfway + set focus)
-   * @param {{x: number, y: number, z: number}} targetPoint - The target world position
+   * Animate camera to either target point or zoom out.
+   * Call with targetPoint to zoom in, or without argument to zoom out.
+   * @param {{x: number, y: number, z: number}} [targetPoint] - Optional target world position
    */
-  zoomToTarget(targetPoint) {
-    const cam = this.renderer.scene.settings.cam;
+  async animateCamera(targetPoint) {
+    // Cancel previous animation
+    if (this.#animationHandle) {
+      this.#animationHandle.cancel();
+    }
 
-    // Store current camera position
-    const currentPos = {
-      x: cam.position.x,
-      y: cam.position.y,
-      z: cam.position.z,
+    const startTime = performance.now();
+    const currentCam = this.renderer.scene.settings.cam;
+    const startState = {
+      position: { ...currentCam.position },
+      forward: { ...currentCam.forward },
+      right: { ...currentCam.right },
+      up: { ...currentCam.up },
+      focus_distance: currentCam.focus_distance,
     };
+    const endState = targetPoint ? this.#calculateZoomToTargetState(currentCam, targetPoint) : this.#calculateZoomOutState(currentCam);
+
+    const animate = (currentTime) => {
+      const elapsed = (currentTime - startTime) / 1000; // Convert to seconds
+      const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+      const easedProgress = this.#easingFunc(progress);
+
+      if (progress < 1) {
+        // Interpolate between start and end states
+        const currentState = this.#interpolateCamera(startState, endState, easedProgress);
+        currentCam.position = { ...currentState.position };
+        currentCam.forward = { ...currentState.forward };
+        currentCam.right = { ...currentState.right };
+        currentCam.up = { ...currentState.up };
+        currentCam.focus_distance = currentState.focus_distance;
+
+        this.#animationHandle.requestId = requestAnimationFrame(animate);
+      } else {
+        // Animation complete
+        currentCam.position = { ...endState.position };
+        currentCam.forward = { ...endState.forward };
+        currentCam.right = { ...endState.right };
+        currentCam.up = { ...endState.up };
+        currentCam.focus_distance = endState.focus_distance;
+        this.#animationHandle = null;
+      }
+
+      this.renderer.invalidateAccumulation();
+    };
+
+    // Start animation
+    this.#animationHandle = {
+      cancel: () => {
+        if (this.#animationHandle && this.#animationHandle.requestId) {
+          cancelAnimationFrame(this.#animationHandle.requestId);
+        }
+      },
+      requestId: null,
+    };
+
+    // Start the animation loop
+    animate(startTime);
+  }
+
+  /**
+   * Calculate target camera state for zoom to target,
+   * including new position, orientation, and focus distance.
+   */
+  #calculateZoomToTargetState(currentCam, targetPoint) {
+    const currentPos = currentCam.position;
 
     // Calculate midpoint between current position and target
     const midpoint = {
@@ -75,68 +168,76 @@ export class ZoomTool {
     forwardY /= forwardLen;
     forwardZ /= forwardLen;
 
-    // Update camera position to midpoint
-    cam.position.x = midpoint.x;
-    cam.position.y = midpoint.y;
-    cam.position.z = midpoint.z;
-
-    // Update forward vector
-    cam.forward.x = forwardX;
-    cam.forward.y = forwardY;
-    cam.forward.z = forwardZ;
-
-    // Recalculate right vector (cross product of world up and forward)
+    // Calculate right vector (cross product of world up and forward)
     const worldUp = { x: 0, y: 1, z: 0 };
-    cam.right.x = worldUp.y * cam.forward.z - worldUp.z * cam.forward.y;
-    cam.right.y = worldUp.z * cam.forward.x - worldUp.x * cam.forward.z;
-    cam.right.z = worldUp.x * cam.forward.y - worldUp.y * cam.forward.x;
+    const right = {
+      x: worldUp.y * forwardZ - worldUp.z * forwardY,
+      y: worldUp.z * forwardX - worldUp.x * forwardZ,
+      z: worldUp.x * forwardY - worldUp.y * forwardX,
+    };
 
-    // Recalculate up vector (cross product of forward and right)
-    cam.up.x = cam.forward.y * cam.right.z - cam.forward.z * cam.right.y;
-    cam.up.y = cam.forward.z * cam.right.x - cam.forward.x * cam.right.z;
-    cam.up.z = cam.forward.x * cam.right.y - cam.forward.y * cam.right.x;
+    // Calculate up vector (cross product of forward and right)
+    const up = {
+      x: forwardY * right.z - forwardZ * right.y,
+      y: forwardZ * right.x - forwardX * right.z,
+      z: forwardX * right.y - forwardY * right.x,
+    };
 
-    cam.focus_distance = newFocusDistance;
-
-    this.renderer.invalidateAccumulation();
+    return {
+      position: midpoint,
+      forward: { x: forwardX, y: forwardY, z: forwardZ },
+      right: right,
+      up: up,
+      focus_distance: newFocusDistance,
+    };
   }
 
   /**
-   * Zoom out (move camera backwards + set focus)
+   * Calculate target camera state for zoom out,
+   * including new position and increased focus distance.
    */
-  zoomOut() {
-    const cam = this.renderer.scene.settings.cam;
-    const moveBackDistance = cam.focus_distance / 2; // Move back a bit, depending on focus distance
+  #calculateZoomOutState(currentCam) {
+    const moveBackDistance = currentCam.focus_distance / 2;
 
-    // Move camera backwards (opposite to forward direction)
-    cam.position.x -= moveBackDistance * cam.forward.x;
-    cam.position.y -= moveBackDistance * cam.forward.y;
-    cam.position.z -= moveBackDistance * cam.forward.z;
-
-    cam.focus_distance += moveBackDistance;
-
-    this.renderer.invalidateAccumulation();
-  }
-
-  activate() {
-    if (this.#isActive) return;
-    this.#isActive = true;
-    // Update button state
-    this.updateButtonState();
-  }
-
-  deactivate() {
-    this.#isActive = false;
-    // Update button state
-    this.updateButtonState();
+    return {
+      position: {
+        x: currentCam.position.x - moveBackDistance * currentCam.forward.x,
+        y: currentCam.position.y - moveBackDistance * currentCam.forward.y,
+        z: currentCam.position.z - moveBackDistance * currentCam.forward.z,
+      },
+      forward: { ...currentCam.forward },
+      right: { ...currentCam.right },
+      up: { ...currentCam.up },
+      focus_distance: currentCam.focus_distance + moveBackDistance,
+    };
   }
 
   /**
-   * Update the tool button title based on active state
+   * Linearly interpolate between two camera states
    */
-  updateButtonState = () => {
-    if (this.toolButton) {
-      this.toolButton.title = this.#isActive ? this.activeToolTitle : this.inactiveToolTitle;
-    }
-  };
+  #interpolateCamera(start, end, t) {
+    return {
+      position: {
+        x: start.position.x + (end.position.x - start.position.x) * t,
+        y: start.position.y + (end.position.y - start.position.y) * t,
+        z: start.position.z + (end.position.z - start.position.z) * t,
+      },
+      forward: {
+        x: start.forward.x + (end.forward.x - start.forward.x) * t,
+        y: start.forward.y + (end.forward.y - start.forward.y) * t,
+        z: start.forward.z + (end.forward.z - start.forward.z) * t,
+      },
+      right: {
+        x: start.right.x + (end.right.x - start.right.x) * t,
+        y: start.right.y + (end.right.y - start.right.y) * t,
+        z: start.right.z + (end.right.z - start.right.z) * t,
+      },
+      up: {
+        x: start.up.x + (end.up.x - start.up.x) * t,
+        y: start.up.y + (end.up.y - start.up.y) * t,
+        z: start.up.z + (end.up.z - start.up.z) * t,
+      },
+      focus_distance: start.focus_distance + (end.focus_distance - start.focus_distance) * t,
+    };
+  }
 }

@@ -30,6 +30,38 @@ export class MoveTool {
     this.toolButton.on("click", onButtonClick);
   }
 
+  activate() {
+    if (this.#isActive) return;
+    this.#isActive = true;
+    this.dragState = {
+      isLeftDragging: false,
+      isRightDragging: false,
+      lastMouseX: 0,
+      lastMouseY: 0,
+    };
+    this.updateButtonState();
+  }
+
+  deactivate() {
+    this.#isActive = false;
+    this.dragState = {
+      isLeftDragging: false,
+      isRightDragging: false,
+      lastMouseX: 0,
+      lastMouseY: 0,
+    };
+    this.updateButtonState();
+  }
+
+  /**
+   * Update the tool button title based on active state
+   */
+  updateButtonState = () => {
+    if (this.toolButton) {
+      this.toolButton.title = this.#isActive ? this.activeToolTitle : this.inactiveToolTitle;
+    }
+  };
+
   onMouseDown = (event) => {
     if (event.button === 0) this.dragState.isLeftDragging = true;
     if (event.button === 2) this.dragState.isRightDragging = true;
@@ -112,40 +144,6 @@ export class MoveTool {
       this.renderer.getDepthAt(this.renderer.canvas.width / 2, this.renderer.canvas.height / 2).then((depth) => {
         if (depth) this.relativeMoveSpeed = Math.min(1.0, Math.max(0.00001, depth));
       });
-    }
-  };
-
-  activate() {
-    if (this.#isActive) return;
-    this.#isActive = true;
-    this.dragState = {
-      isLeftDragging: false,
-      isRightDragging: false,
-      lastMouseX: 0,
-      lastMouseY: 0,
-    };
-    // Update button state
-    this.updateButtonState();
-  }
-
-  deactivate() {
-    this.#isActive = false;
-    this.dragState = {
-      isLeftDragging: false,
-      isRightDragging: false,
-      lastMouseX: 0,
-      lastMouseY: 0,
-    };
-    // Update button state
-    this.updateButtonState();
-  }
-
-  /**
-   * Update the tool button title based on active state
-   */
-  updateButtonState = () => {
-    if (this.toolButton) {
-      this.toolButton.title = this.#isActive ? this.activeToolTitle : this.inactiveToolTitle;
     }
   };
 }
