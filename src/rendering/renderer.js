@@ -241,7 +241,16 @@ export class Renderer {
     this.#device.queue.writeBuffer(
       this.#objectsBuffer,
       0,
-      new Float32Array(this.scene.objects.flatMap((o) => [o.object_type, o.material_index, 0.0, 0.0, ...[o.position.x, o.position.y, o.position.z], o.scale])),
+      new Float32Array(
+        this.scene.objects.flatMap((o) => [
+          o.object_type,
+          this.scene.materials.findIndex((m) => m.id === o.material_id),
+          0.0,
+          0.0,
+          ...[o.position.x, o.position.y, o.position.z],
+          o.scale,
+        ]),
+      ),
     );
     this.#device.queue.writeBuffer(
       this.#materialsBuffer,
@@ -382,7 +391,8 @@ export class Renderer {
         this.workload_accumulation_steps,
         scene.objects.length, //object_count
         scene.objects.filter((o) => {
-          const e = scene.materials[o.material_index].emission;
+          const materialIndex = this.scene.materials.findIndex((m) => m.id === o.material_id);
+          const e = scene.materials[materialIndex]?.emission || { r: 0, g: 0, b: 0 };
           return e.r + e.g + e.b > 0.0;
         }).length, //emissive_object_count
       ]),

@@ -17,6 +17,10 @@ export default class GUI {
     this.currentSetPositionButton = null;
     this.setFocusButton = null;
     this.cameraPane = null;
+    this.objectsPane = null;
+    this.materialsPane = null;
+    this.objectEditorPanes = [];
+    this.materialEditorPanes = [];
   }
 
   initialize = () => {
@@ -284,24 +288,55 @@ export default class GUI {
     tab.on("change", () => {
       this.renderer.invalidateAccumulation();
     });
-    const objectsPane = tab.pages[0];
-    const materialsPane = tab.pages[1];
+    this.objectsPane = tab.pages[0];
+    this.materialsPane = tab.pages[1];
 
-    objectsPane
-      .addButton({
-        title: "+",
-        label: "Add object",
-      })
-      .on("click", () => {});
+    this.setupObjectManagement(this.objectsPane);
+    this.setupMaterialManagement(this.materialsPane);
+  };
 
+  setupObjectManagement = (objectsPane) => {
+    const addObjectButton = objectsPane.addButton({
+      title: "+",
+      label: "Add object",
+    });
+    addObjectButton.on("click", () => {
+      this.renderer.scene.objects.push({
+        object_type: 0, // sphere
+        material_id: this.renderer.scene.materials[0]?.id || "0",
+        position: { x: 0.0, y: 0.0, z: 0.0 },
+        scale: 1.0,
+      });
+
+      this.refreshObjectGUI(objectsPane);
+
+      this.renderer.invalidateAccumulation();
+    });
+
+    this.refreshObjectGUI(objectsPane);
+  };
+
+  refreshObjectGUI = (objectsPane) => {
+    // Clear existing GUI elements
+    for (const pane of this.objectEditorPanes) {
+      pane.dispose();
+    }
+    this.objectEditorPanes = [];
+
+    // Get current material options
     let material_options = {};
-    for (let i = 0; i < this.renderer.scene.materials.length; i++) material_options[this.renderer.scene.materials[i].name] = i;
+    for (const mat of this.renderer.scene.materials) {
+      material_options[mat.name] = mat.id;
+    }
 
+    // Create GUI for each object
     for (const obj of this.renderer.scene.objects) {
       const objectEditorPane = objectsPane.addFolder({
-        title: "object",
+        title: `Object ${this.renderer.scene.objects.indexOf(obj) + 1}`,
         expanded: false,
       });
+
+      this.objectEditorPanes.push(objectEditorPane);
 
       objectEditorPane.addBinding(obj, "object_type", {
         options: {
@@ -310,7 +345,7 @@ export default class GUI {
         },
       });
 
-      objectEditorPane.addBinding(obj, "material_index", {
+      objectEditorPane.addBinding(obj, "material_id", {
         label: "Material",
         options: material_options,
       });
@@ -350,26 +385,66 @@ export default class GUI {
         }
       });
 
-      objectEditorPane
-        .addButton({
-          title: "🗑",
-          label: "Delete object",
-        })
-        .on("click", () => {});
+      const deleteObjectButton = objectEditorPane.addButton({
+        title: "🗑",
+        label: "Delete object",
+      });
+      deleteObjectButton.on("click", () => {
+        // Remove the object from the scene
+        const index = this.renderer.scene.objects.indexOf(obj);
+        this.renderer.scene.objects.splice(index, 1);
+        // cleanup gui
+        this.clickAction = null;
+        this.currentObjectEditorPane = null;
+        this.currentSetPositionButton = null;
+        this.selectedObjectIndex = null;
+        this.refreshObjectGUI(objectsPane);
+
+        this.renderer.invalidateAccumulation();
+      });
     }
+  };
 
-    materialsPane
-      .addButton({
-        title: "+",
-        label: "Add material",
-      })
-      .on("click", () => {});
+  setupMaterialManagement = (materialsPane) => {
+    const addMaterialButton = materialsPane.addButton({
+      title: "+",
+      label: "Add material",
+    });
+    addMaterialButton.on("click", () => {
+      this.renderer.scene.materials.push({
+        id: `id_${Date.now()}`,
+        name: `Material ${this.renderer.scene.materials.length + 1}`,
+        material_type: 0, // diffuse
+        albedo: { r: 0.5, g: 0.5, b: 0.5 },
+        ior: 0,
+        emission: { r: 0.0, g: 0.0, b: 0.0 },
+        roughness: 0.0,
+        metallic: 0.0,
+      });
 
+      this.refreshMaterialGUI(materialsPane);
+
+      this.renderer.invalidateAccumulation();
+    });
+
+    this.refreshMaterialGUI(materialsPane);
+  };
+
+  refreshMaterialGUI = (materialsPane) => {
+    // Clear existing GUI elements
+    for (const pane of this.materialEditorPanes) {
+      pane.dispose();
+    }
+    this.materialEditorPanes = [];
+
+    // Create GUI for each material
     for (const mat of this.renderer.scene.materials) {
       const materialEditorPane = materialsPane.addFolder({
         title: mat.name,
         expanded: false,
       });
+
+      this.materialEditorPanes.push(materialEditorPane);
 
       materialEditorPane.addBinding(mat, "material_type", {
         options: {
@@ -400,6 +475,35 @@ export default class GUI {
         min: 0,
         max: 1,
       });
+
+      const deleteMaterialButton = materialEditorPane.addButton({
+        title: "🗑",
+        label: "Delete material",
+      });
+      deleteMaterialButton.on("click", () => {
+        // Remove the material from the scene
+        const deletedMaterialId = mat.id;
+        const index = this.renderer.scene.materials.indexOf(mat);
+        this.renderer.scene.materials.splice(index, 1);
+
+        // Update objects that referenced the deleted material to use the first available material
+        if (this.renderer.scene.materials.length > 0) {
+          const newMaterialId = this.renderer.scene.materials[0].id;
+          for (const obj of this.renderer.scene.objects) {
+            if (obj.material_id === deletedMaterialId) {
+              obj.material_id = newMaterialId;
+            }
+          }
+        }
+
+        // cleanup gui
+        this.refreshMaterialGUI(materialsPane);
+        this.refreshObjectGUI(this.objectsPane);
+
+        this.renderer.invalidateAccumulation();
+      });
+      // update material options in object editor
+      this.refreshObjectGUI(this.objectsPane);
     }
   };
 }
