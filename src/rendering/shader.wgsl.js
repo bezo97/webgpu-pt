@@ -117,15 +117,15 @@ var<private> current_accumulation_step: u32 = 0u;
 var<private> save_depth_data: bool = false;
 
 // Hash function for 32 bit uint
-// Found here: https://nullprogram.com/blog/2018/07/31/
+// Current lowest bias 2-round function from here: https://github.com/skeeto/hash-prospector
 fn lowbias32(x_in: u32) -> u32
 {
     var x = x_in;
     x ^= x >> 16;
-    x *= 0x7feb352du;
+    x *= 0x21f0aaadu;
     x ^= x >> 15;
-    x *= 0x846ca68bu;
-    x ^= x >> 16;
+    x *= 0xd35a2d97u;
+    x ^= x >> 15;
     return x;
 }
 
