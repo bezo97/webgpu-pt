@@ -7,6 +7,11 @@ const no_hit = Hit(-1, -1.0, vec3f(0.0), vec3f(0.0));
 
 //uniform structs:
 
+struct FractalSettings {
+    julia_c: vec3f,
+    julia_mode: f32,//bool
+}
+
 struct SceneMaterial {
     material_type: f32,//i32
     albedo: vec3f,
@@ -49,6 +54,7 @@ struct QuerySettings {
 struct SceneSettings {
     cam: Camera,
     render_settings: RenderSettings,
+    fractal_settings: FractalSettings,
     sky_color: vec3f,
     time: f32,
     width: f32,
@@ -229,6 +235,117 @@ fn sphere_t1t2(ray: Ray, radius: f32, position: vec3f) -> vec2f
     return vec2f(t1, t2);
 }
 
+const MANDALAY_ROT: vec3f = vec3f(1.0, 1.0, 1.0);
+const MANDALAY_FO: f32 = 1.0;
+const MANDALAY_ZTOWER: f32 = 0.0;
+const MANDALAY_G: f32 = 0.0;
+const MANDALAY_MINRAD2: f32 = 1.0;
+const MANDALAY_SCALE: f32 = 2.62;
+const MANDALAY_COLOR_ITERATIONS: i32 = 10;
+const MANDALAY_ABSSCALE_RAISED_TO_1MITERS: f32 = 0.0;
+
+fn de_mandalay(p: vec3f, steps: i32) -> f32
+{
+    let default_scaling = 5.0; // fit in unit sphere with default params
+    // p.w is the distance estimate (initialized to 1.0)
+    var p_vec4: vec4f = vec4f(default_scaling * p, 1.0);
+    var c: vec4f = p_vec4;
+    
+    // If Julia mode, set c.xyz to Julia constant
+    if (settings.fractal_settings.julia_mode > 0.0) {
+        c = vec4f(settings.fractal_settings.julia_c, p_vec4.w);
+    }
+    
+    // var orbit_trap: vec4f = vec4f(1000.0, 1000.0, 1000.0, 1000.0);
+    
+    for (var i: i32 = 0; i < steps; i++) {
+        let p_xyz_rotated: vec3f = MANDALAY_ROT * p_vec4.xyz;
+        
+        // Get absolute values
+        let n: vec3f = abs(p_xyz_rotated);
+        
+        // Kifs Octahedral fold:
+        var n_sorted: vec3f = n;
+        if (n_sorted.y > n_sorted.x) {
+            n_sorted = vec3f(n_sorted.y, n_sorted.x, n_sorted.z);
+        }
+        if (n_sorted.z > n_sorted.y) {
+            n_sorted = vec3f(n_sorted.x, n_sorted.z, n_sorted.y);
+        }
+        if (n_sorted.y > n_sorted.x) {
+            n_sorted = vec3f(n_sorted.y, n_sorted.x, n_sorted.z);
+        }
+        
+        // ABoxKali-like abs folding:
+        let fx: f32 = -2.0 * MANDALAY_FO + n_sorted.x;
+        
+        let gy: f32 = MANDALAY_G + n_sorted.y;
+        
+        // Edges:
+        var xf: f32 = (MANDALAY_FO - abs(-MANDALAY_FO + n_sorted.x));
+        var yf: f32 = (MANDALAY_FO - abs(-MANDALAY_FO + n_sorted.y));
+        var zf: f32 =  MANDALAY_ZTOWER + n_sorted.z;
+        
+        if (fx > 0.0 && fx > n_sorted.y) {
+            if (fx > gy) {
+                xf += MANDALAY_G;
+                yf = (MANDALAY_FO - abs(MANDALAY_G - MANDALAY_FO + n_sorted.y));
+            } else {
+                xf = -n_sorted.y;
+                yf = (MANDALAY_FO - abs(-3.0 * MANDALAY_FO + n_sorted.x));
+            }
+        }
+        
+        // Build new p_vec4 with updated x, y, z (keeping original w)
+        p_vec4 = vec4f(xf, yf, zf, p_vec4.w);
+        
+        let r2: f32 = dot(p_vec4.xyz, p_vec4.xyz);
+
+        // // Orbit trap calculation
+        // if (i < MANDALAY_COLOR_ITERATIONS) {
+        //     orbit_trap = min(orbit_trap, vec4f(abs(p_vec4.xyz), r2));
+        // }
+        
+        // Ball folding - multiply all components
+        let fold_factor: f32 = clamp(max(MANDALAY_MINRAD2 / r2, MANDALAY_MINRAD2), 0.0, 1.0);
+        p_vec4 *= fold_factor;
+        p_vec4 = p_vec4 * MANDALAY_SCALE + c;
+
+        if (r2 > 1000.0) {
+            break;
+        }
+    }
+    
+    // Distance estimation
+    return ((length(p_vec4.xyz) - MANDALAY_ABSSCALE_RAISED_TO_1MITERS) / p_vec4.w) / default_scaling;
+}
+
+fn de_amoser_sine(p: vec3f, steps: i32, scale: f32) -> f32
+{//based on: Amoser's formula from fractal chats
+    var c: vec4f = vec4f(p*20.0, 1.0);
+    if (settings.fractal_settings.julia_mode > 0.0) {
+        c = vec4f(settings.fractal_settings.julia_c, 1.0);
+    }
+    
+    var p1 = vec4f(p*20.0, 1.0);
+    for (var i = 0; i < steps; i++)
+    {
+        p1 = vec4f(
+            sin(p1.x) * cosh(p1.y),
+            cos(p1.x) * cos(p1.z) * sinh(p1.y),
+            sin(p1.z) * cosh(p1.y),
+            p1.w);
+        p1 = p1 * scale + c;
+        
+        let r2: f32 = dot(p1.xyz, p1.xyz);
+        if (r2 > 1000.0) {
+            break;
+        }
+
+    }
+    return length(p1.xyz)/abs(p1.w)/20.0;
+}
+
 fn de_mandelbox(p: vec3f, steps: i32, scale: f32) -> f32
 {//based on: https://www.shadertoy.com/view/MtXXDl
     let q0 = vec4f(p*10.0, 1.0);
@@ -240,16 +357,20 @@ fn de_mandelbox(p: vec3f, steps: i32, scale: f32) -> f32
     return length(q.xyz) / abs(q.w)/10.0;
 }
 
-fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32 {
+fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32 {    
     //transform by object's translation/scale
     var pos_tf = (pos - de_object.position)/de_object.scale;
     
-    var iterations = 10;
+    var iterations = 15;
     if(fast_eval){
         iterations = 5;
     }
 
-    let de = de_mandelbox(pos_tf, iterations, 2.62);
+    var de: f32 = 0.0;
+    //de = de_amoser_sine(pos_tf, iterations, 2.0);
+    de = de_mandalay(pos_tf, iterations);
+    //de = de_mandelbox(pos_tf, iterations, 2.62);
+    
 
     //tranform back
     return de*de_object.scale;

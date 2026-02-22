@@ -90,7 +90,7 @@ export class Renderer {
     //TODO: consider using a single buffer
     this.#settingsBuffer = this.#device.createBuffer({
       label: "settingsBuffer",
-      size: 4 * 4 * 9,
+      size: 4 * 4 * 12,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.#objectsBuffer = this.#device.createBuffer({
@@ -382,6 +382,10 @@ export class Renderer {
         scene.settings.render_settings.russian_roulette_start_bounce,
         scene.settings.render_settings.russian_roulette_min_p_reflect,
         scene.settings.render_settings.russian_roulette_min_p_refract,
+        scene.settings.fractal_settings.julia_c.x,
+        scene.settings.fractal_settings.julia_c.y,
+        scene.settings.fractal_settings.julia_c.z,
+        scene.settings.fractal_settings.julia_mode ? 1.0 : 0.0,
         ...[scene.settings.sky_color.r, scene.settings.sky_color.g, scene.settings.sky_color.b],
         scene.settings.time,
         scene.settings.width,

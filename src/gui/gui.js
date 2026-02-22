@@ -58,6 +58,9 @@ export default class GUI {
     // Setup scene settings
     this.setupSceneSettings();
 
+    // Setup fractal settings
+    this.setupFractalSettings();
+
     // Activate the initial tool
     this.activateTool(this.tools[0]);
   };
@@ -213,6 +216,24 @@ export default class GUI {
       min: 0,
       max: 1,
       step: 0.01,
+    });
+  };
+
+  setupFractalSettings = () => {
+    const fractalPane = this.mainPane.addFolder({
+      title: "Fractal",
+      expanded: false,
+    });
+    fractalPane.on("change", () => {
+      this.renderer.invalidateAccumulation();
+    });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "julia_mode", {
+      label: "Julia mode",
+    });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "julia_c", {
+      label: "Julia C",
+      min: -5,
+      max: 5,
     });
   };
 

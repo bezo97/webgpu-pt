@@ -14,6 +14,10 @@ const settings = {
     russian_roulette_min_p_reflect: 0.5,
     russian_roulette_min_p_refract: 0.75,
   },
+  fractal_settings: {
+    julia_c: { x: 0.0, y: 0.0, z: 0.0 },
+    julia_mode: true,
+  },
   sky_color: { r: 0.02, g: 0.03, b: 0.05 },
   time: 0.0,
   width: 720,
