@@ -90,7 +90,7 @@ export class Renderer {
     //TODO: consider using a single buffer
     this.#settingsBuffer = this.#device.createBuffer({
       label: "settingsBuffer",
-      size: 4 * 4 * 12,
+      size: 4 * 4 * 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.#objectsBuffer = this.#device.createBuffer({
@@ -361,8 +361,44 @@ export class Renderer {
     this.#device.queue.writeBuffer(this.#querySettingsBuffer, 0, new Float32Array([query_pixel_x, query_pixel_y]));
   }
 
+  #computeScreenGradients() {
+    const cam = this.scene.settings.cam;
+    const canvas = this.canvas;
+    const fovRad = (cam.fov_angle * Math.PI) / 180.0;
+
+    // Compute pixel step sizes based on FOV and screen resolution
+    // pixelStepX accounts for aspect ratio
+    const aspectRatio = canvas.width / canvas.height;
+    const pixelStepX = aspectRatio * Math.tan(fovRad / 2.0) * 2.0;
+    const pixelStepY = Math.tan(fovRad / 2.0) * 2.0;
+
+    // Screen gradients: world-space vectors corresponding to 1-pixel steps
+    // X gradient follows camera's right vector scaled by pixel step
+    // Y gradient follows camera's up vector scaled by pixel step
+    // Z gradient is forward (perpendicular to screen)
+    const xGrad = {
+      x: cam.right.x * pixelStepX,
+      y: cam.right.y * pixelStepX,
+      z: cam.right.z * pixelStepX,
+    };
+    const yGrad = {
+      x: cam.up.x * pixelStepY,
+      y: cam.up.y * pixelStepY,
+      z: cam.up.z * pixelStepY,
+    };
+    const zGrad = {
+      x: -cam.forward.x,
+      y: -cam.forward.y,
+      z: -cam.forward.z,
+    };
+
+    return { xGrad, yGrad, zGrad };
+  }
+
   #updateSettingsBuffer() {
     const scene = this.scene;
+    const screenGrads = this.#computeScreenGradients();
+
     this.#device.queue.writeBuffer(
       this.#settingsBuffer,
       0,
@@ -382,6 +418,12 @@ export class Renderer {
         scene.settings.render_settings.russian_roulette_start_bounce,
         scene.settings.render_settings.russian_roulette_min_p_reflect,
         scene.settings.render_settings.russian_roulette_min_p_refract,
+        ...[screenGrads.xGrad.x, screenGrads.xGrad.y, screenGrads.xGrad.z],
+        0.0,
+        ...[screenGrads.yGrad.x, screenGrads.yGrad.y, screenGrads.yGrad.z],
+        0.0,
+        ...[screenGrads.zGrad.x, screenGrads.zGrad.y, screenGrads.zGrad.z],
+        0.0,
         scene.settings.fractal_settings.julia_c.x,
         scene.settings.fractal_settings.julia_c.y,
         scene.settings.fractal_settings.julia_c.z,

@@ -45,6 +45,9 @@ struct RenderSettings {
     russian_roulette_start_bounce: f32,//i32
     russian_roulette_min_p_reflect: f32,
     russian_roulette_min_p_refract: f32,
+    screenXGradient: vec3f,
+    screenYGradient: vec3f,
+    screenZGradient: vec3f,
 }
 
 struct QuerySettings {
@@ -100,6 +103,20 @@ struct MISData {
     hit: Hit,
     brdf: BRDFSample,
     is_material_specular: bool,
+}
+
+struct IterationLoopResult {
+    escape_length: f32,
+    potential: f32,         // for example log/pow formula based on escape_length and iteration count
+    escaped: bool,          // Whether bailout was reached
+    orbit_trap_min: f32,      // Minimum |position|² during iteration
+    position: vec4f,
+};
+
+struct DEResults {
+    de: f32,
+    center: IterationLoopResult,
+    offsets: array<IterationLoopResult, 4>,
 }
 
 //TODO: consider constant memory buffer?
@@ -241,152 +258,199 @@ const MANDALAY_ZTOWER: f32 = 0.0;
 const MANDALAY_G: f32 = 0.0;
 const MANDALAY_MINRAD2: f32 = 1.0;
 const MANDALAY_SCALE: f32 = 2.62;
-const MANDALAY_COLOR_ITERATIONS: i32 = 10;
-const MANDALAY_ABSSCALE_RAISED_TO_1MITERS: f32 = 0.0;
 
-fn de_mandalay(p: vec3f, steps: i32) -> f32
+fn fractal_mandalay_iterate(p: vec4f, c: vec4f) -> vec4f
 {
-    let default_scaling = 5.0; // fit in unit sphere with default params
-    // p.w is the distance estimate (initialized to 1.0)
-    var p_vec4: vec4f = vec4f(default_scaling * p, 1.0);
-    var c: vec4f = p_vec4;
+    let p_xyz_rotated: vec3f = MANDALAY_ROT * p.xyz;
     
-    // If Julia mode, set c.xyz to Julia constant
-    if (settings.fractal_settings.julia_mode > 0.0) {
-        c = vec4f(settings.fractal_settings.julia_c, p_vec4.w);
+    // Get absolute values
+    let n: vec3f = abs(p_xyz_rotated);
+    
+    // Kifs Octahedral fold:
+    var n_sorted: vec3f = n;
+    if (n_sorted.y > n_sorted.x) {
+        n_sorted = vec3f(n_sorted.y, n_sorted.x, n_sorted.z);
+    }
+    if (n_sorted.z > n_sorted.y) {
+        n_sorted = vec3f(n_sorted.x, n_sorted.z, n_sorted.y);
+    }
+    if (n_sorted.y > n_sorted.x) {
+        n_sorted = vec3f(n_sorted.y, n_sorted.x, n_sorted.z);
     }
     
-    // var orbit_trap: vec4f = vec4f(1000.0, 1000.0, 1000.0, 1000.0);
+    // ABoxKali-like abs folding:
+    let fx: f32 = -2.0 * MANDALAY_FO + n_sorted.x;
     
-    for (var i: i32 = 0; i < steps; i++) {
-        let p_xyz_rotated: vec3f = MANDALAY_ROT * p_vec4.xyz;
-        
-        // Get absolute values
-        let n: vec3f = abs(p_xyz_rotated);
-        
-        // Kifs Octahedral fold:
-        var n_sorted: vec3f = n;
-        if (n_sorted.y > n_sorted.x) {
-            n_sorted = vec3f(n_sorted.y, n_sorted.x, n_sorted.z);
+    let gy: f32 = MANDALAY_G + n_sorted.y;
+    
+    // Edges:
+    var xf: f32 = (MANDALAY_FO - abs(-MANDALAY_FO + n_sorted.x));
+    var yf: f32 = (MANDALAY_FO - abs(-MANDALAY_FO + n_sorted.y));
+    var zf: f32 =  MANDALAY_ZTOWER + n_sorted.z;
+    
+    if (fx > 0.0 && fx > n_sorted.y) {
+        if (fx > gy) {
+            xf += MANDALAY_G;
+            yf = (MANDALAY_FO - abs(MANDALAY_G - MANDALAY_FO + n_sorted.y));
+        } else {
+            xf = -n_sorted.y;
+            yf = (MANDALAY_FO - abs(-3.0 * MANDALAY_FO + n_sorted.x));
         }
-        if (n_sorted.z > n_sorted.y) {
-            n_sorted = vec3f(n_sorted.x, n_sorted.z, n_sorted.y);
-        }
-        if (n_sorted.y > n_sorted.x) {
-            n_sorted = vec3f(n_sorted.y, n_sorted.x, n_sorted.z);
-        }
-        
-        // ABoxKali-like abs folding:
-        let fx: f32 = -2.0 * MANDALAY_FO + n_sorted.x;
-        
-        let gy: f32 = MANDALAY_G + n_sorted.y;
-        
-        // Edges:
-        var xf: f32 = (MANDALAY_FO - abs(-MANDALAY_FO + n_sorted.x));
-        var yf: f32 = (MANDALAY_FO - abs(-MANDALAY_FO + n_sorted.y));
-        var zf: f32 =  MANDALAY_ZTOWER + n_sorted.z;
-        
-        if (fx > 0.0 && fx > n_sorted.y) {
-            if (fx > gy) {
-                xf += MANDALAY_G;
-                yf = (MANDALAY_FO - abs(MANDALAY_G - MANDALAY_FO + n_sorted.y));
-            } else {
-                xf = -n_sorted.y;
-                yf = (MANDALAY_FO - abs(-3.0 * MANDALAY_FO + n_sorted.x));
-            }
-        }
-        
-        // Build new p_vec4 with updated x, y, z (keeping original w)
-        p_vec4 = vec4f(xf, yf, zf, p_vec4.w);
-        
-        let r2: f32 = dot(p_vec4.xyz, p_vec4.xyz);
+    }
+    
+    // Build new p_vec4 with updated x, y, z (keeping original w)
+    var result: vec4f = vec4f(xf, yf, zf, p.w);
+    
+    // Ball folding
+    let r2: f32 = dot(result.xyz, result.xyz);
+    let fold_factor: f32 = clamp(max(MANDALAY_MINRAD2 / r2, MANDALAY_MINRAD2), 0.0, 1.0);
+    result *= fold_factor;
+    
+    return result * MANDALAY_SCALE + c;
+}
 
-        // // Orbit trap calculation
-        // if (i < MANDALAY_COLOR_ITERATIONS) {
-        //     orbit_trap = min(orbit_trap, vec4f(abs(p_vec4.xyz), r2));
-        // }
-        
-        // Ball folding - multiply all components
-        let fold_factor: f32 = clamp(max(MANDALAY_MINRAD2 / r2, MANDALAY_MINRAD2), 0.0, 1.0);
-        p_vec4 *= fold_factor;
-        p_vec4 = p_vec4 * MANDALAY_SCALE + c;
+//scale: anything beyond 1.5 doesn't really work
+fn fractal_amoser_sine_iterate(p: vec4f, scale: f32, c: vec4f) -> vec4f
+{
+    return vec4f(
+        sin(p.x) * cosh(p.y),
+        cos(p.x) * cos(p.z) * sinh(p.y),
+        sin(p.z) * cosh(p.y),
+        p.w
+    ) * scale + c;
+}
 
-        if (r2 > 1000.0) {
+fn fractal_mandelbox_iterate(p: vec4f, scale: f32, c: vec4f) -> vec4f
+{
+    let folded = clamp(p.xyz, vec3f(-1.0), vec3f(1.0)) * 2.0 - p.xyz;
+    return vec4f(folded, p.w) * scale / clamp(dot(p.xyz, p.xyz), 0.5, 1.0) + c;
+}
+
+fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> vec4f {    
+    switch(i32(fractal_object.object_type)) { //TODO: option to select the fractal type
+        case 1: {
+            return fractal_mandalay_iterate(10.0*p, c)/10.0;
+        }
+        case 2: {
+            return fractal_amoser_sine_iterate(p, 1.0, c);
+        }
+        case 3: {
+            return fractal_mandelbox_iterate(p, 2.0, c);
+        }
+        case default: {
+            return vec4f(0.0);
+        }
+    }
+}
+
+fn compute_fractal_state(pos: vec3f, de_object: SceneObject, c: vec4f, max_iter: i32) -> IterationLoopResult {
+    var p: vec4f = vec4f(pos, 1.0);
+    var r2: f32 = 0.0;
+    var iter_count: i32 = 0;
+    var orbit_trap_min: f32 = 1e20;
+    
+    for (var i: i32 = 0; i < max_iter; i++) {
+        p = fractal_iteration_step(de_object, p, c);
+        r2 = dot(p.xyz, p.xyz);
+        iter_count = i + 1;
+        orbit_trap_min = min(orbit_trap_min, r2);
+        if (r2 > 16.0) {
             break;
         }
     }
     
-    // Distance estimation
-    return ((length(p_vec4.xyz) - MANDALAY_ABSSCALE_RAISED_TO_1MITERS) / p_vec4.w) / default_scaling;
+    let escape_length = length(p.xyz);
+    let iter_f = f32(iter_count);
+    
+    var potential: f32;
+    if (r2 > 16.0) {
+        potential = log(escape_length) * iter_f / escape_length; //not sure this is good in general
+        //potential = log(escape_length) / pow(8.0, iter_f); // example for pow8 Mandelbulb-like fractals
+    } else {
+        potential = 0.0;
+    }
+    
+    return IterationLoopResult(escape_length, potential, r2 > 16.0, orbit_trap_min, p);
 }
 
-fn de_amoser_sine(p: vec3f, steps: i32, scale: f32) -> f32
-{//based on: Amoser's formula from fractal chats
-    var c: vec4f = vec4f(p*20.0, 1.0);
+fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, surface_eps: f32) -> DEResults {
+    //transform by object's translation/scale
+    var pos = (pos0 - de_object.position) / de_object.scale;
+
+    var iterations = 15;
+    if (fast_eval) {
+        iterations = 5;
+    }
+    
+    // Julia mode handling
+    var c: vec4f = vec4f(pos, 1.0);
     if (settings.fractal_settings.julia_mode > 0.0) {
         c = vec4f(settings.fractal_settings.julia_c, 1.0);
     }
+
+    let iteration_result = compute_fractal_state(pos, de_object, c, iterations);
+
+    // Check if inside fractal (potential is 0 or didn't escape)
+    if (iteration_result.potential <= 0.0 || iteration_result.escape_length < 0.1) {
+        return DEResults(0.0, iteration_result, array<IterationLoopResult, 4>(iteration_result, iteration_result, iteration_result, iteration_result));
+    }
+
+    // Compute numerical gradient using finite differences
+    let offset = 0.01*EPS; // TODO: implement parameter to control this
+    let offsetResults = get_tetrahedron_offsets(pos, de_object, offset, c, iterations);
+    let rx = offsetResults[0];
+    let ry = offsetResults[1];
+    let rz = offsetResults[2];
+    let rw = offsetResults[3];
     
-    var p1 = vec4f(p*20.0, 1.0);
-    for (var i = 0; i < steps; i++)
-    {
-        p1 = vec4f(
-            sin(p1.x) * cosh(p1.y),
-            cos(p1.x) * cos(p1.z) * sinh(p1.y),
-            sin(p1.z) * cosh(p1.y),
-            p1.w);
-        p1 = p1 * scale + c;
-        
-        let r2: f32 = dot(p1.xyz, p1.xyz);
-        if (r2 > 1000.0) {
-            break;
-        }
-
-    }
-    return length(p1.xyz)/abs(p1.w)/20.0;
-}
-
-fn de_mandelbox(p: vec3f, steps: i32, scale: f32) -> f32
-{//based on: https://www.shadertoy.com/view/MtXXDl
-    let q0 = vec4f(p*10.0, 1.0);
-    var q = q0;
-    for (var n = 0; n < steps; n++) {
-        q = vec4f(clamp(q.xyz, vec3f(-1.0), vec3f(1.0)) * 2.0 - q.xyz, q.w);
-        q = q * scale / clamp(dot(q.xyz, q.xyz), 0.5, 1.) + q0;
-    }
-    return length(q.xyz) / abs(q.w)/10.0;
-}
-
-fn estimate_distance(pos: vec3f, de_object: SceneObject, fast_eval: bool) -> f32 {    
-    //transform by object's translation/scale
-    var pos_tf = (pos - de_object.position)/de_object.scale;
-    
-    var iterations = 15;
-    if(fast_eval){
-        iterations = 5;
-    }
-
+    //Some DE methods based on: http://blog.hvidtfeldts.net/index.php/2011/09/distance-estimated-3d-fractals-v-the-mandelbulb-different-de-approximations/
     var de: f32 = 0.0;
-    //de = de_amoser_sine(pos_tf, iterations, 2.0);
-    de = de_mandalay(pos_tf, iterations);
-    //de = de_mandelbox(pos_tf, iterations, 2.62);
-    
+    if(0.0 == 0.0)
+    {
+        //makin-buddhi de:
+        // DE = 0.5 * r * log(r) / |grad(r)|
+        let grad = vec4f(rx.escape_length, ry.escape_length, rz.escape_length, rw.escape_length) - vec4f(iteration_result.escape_length);
+        let grad_len = length(grad / offset);
+        de = 0.5 * iteration_result.escape_length * log(iteration_result.escape_length) / grad_len;
+    }
+    else if(0.0 == 0.0)
+    {
+        //potential gradient de:
+        // DE = (0.5 / exp(G)) * sinh(G) / |grad(G)|
+        let G = iteration_result.potential;
+        let grad = vec4f(rx.potential, ry.potential, rz.potential, rw.potential) - vec4f(G);
+        let grad_len = length(grad / offset);
+        let sinh_G = (exp(G) - exp(-G)) / 2.0;// Using sinh(G) approximation for numerical stability
+        de = (0.5 / exp(G)) * sinh_G / grad_len;
+    }
+    else if(0.0 == 0.0)
+    {
+        //iq de:
+        // DE = G / |grad(G)|
+        let G = iteration_result.potential;
+        let grad = vec4f(rx.potential, ry.potential, rz.potential, rw.potential) - vec4f(G);
+        let grad_len = length(grad / offset);
+        de =  G / grad_len;
+    }
 
-    //tranform back
-    return de*de_object.scale;
+    // transform back
+    de = de * de_object.scale;
+
+    return DEResults(de, iteration_result, offsetResults);
 }
 
-fn get_tetrahedron_normal(p: vec3f, de_object: SceneObject, normal_eps: f32, fast_eval: bool) -> vec3f {
+fn get_tetrahedron_offsets(p_center: vec3f, de_object: SceneObject, offset_eps: f32, c: vec4f, iterations: i32) -> array<IterationLoopResult, 4> {
     let k1 = vec3f(1.0, -1.0, -1.0);
     let k2 = vec3f(-1.0, -1.0, 1.0);
     let k3 = vec3f(-1.0, 1.0, -1.0);
     let k4 = vec3f(1.0, 1.0, 1.0);
-    return normalize(
-        k1 * estimate_distance(p + normal_eps * k1, de_object, fast_eval) +
-        k2 * estimate_distance(p + normal_eps * k2, de_object, fast_eval) +
-        k3 * estimate_distance(p + normal_eps * k3, de_object, fast_eval) +
-        k4 * estimate_distance(p + normal_eps * k4, de_object, fast_eval)
+    return array<IterationLoopResult, 4>(
+        compute_fractal_state(p_center + offset_eps * k1, de_object, c, iterations),
+        compute_fractal_state(p_center + offset_eps * k2, de_object, c, iterations),
+        compute_fractal_state(p_center + offset_eps * k3, de_object, c, iterations),
+        compute_fractal_state(p_center + offset_eps * k4, de_object, c, iterations)
     );
+
 }
 
 fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
@@ -402,7 +466,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     var total_distance = max(EPS, bounding_sphere_t1t2.x);
 
     var max_marching_steps = 500;
-    var raystep_multiplier = 0.9;//aka. fuzzy factor
+    var raystep_multiplier = 0.95;//aka. fuzzy factor
     if(fast_eval) {
         max_marching_steps = 100;
         raystep_multiplier = 1.0;
@@ -411,12 +475,15 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     let pixel_angular_resolution = 2.0*tan((settings.cam.fov_angle * PI / 180.0)*0.5) / settings.width; //TODO: this could be a uniform
     var surface_eps = EPS;
     var is_surface_hit = false;
+    var iteration_results: DEResults;
     for(var i = 0; i < max_marching_steps; i++)
     {
         let pos = ray.pos + ray.dir * total_distance;
-        var raystep_estimate = estimate_distance(pos, fractal_object, fast_eval);
+        iteration_results = estimate_distance(pos, fractal_object, fast_eval, surface_eps);
+    
+        let raystep_estimate = iteration_results.de * raystep_multiplier;
 
-        total_distance += raystep_estimate * raystep_multiplier;
+        total_distance += raystep_estimate;
 
         if(total_distance > bounding_sphere_t1t2.y) {
             return no_hit;//ray intersected the bounding sphere but not the fractal
@@ -441,7 +508,19 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
 
     total_distance -= 2.0*surface_eps; //move back a bit to avoid self-intersection problems
     let hit_pos = ray.pos + ray.dir * total_distance;
-    var surface_normal = get_tetrahedron_normal(hit_pos, fractal_object, surface_eps, fast_eval);
+
+    // var surface_normal = normalize(
+    //     iteration_results.offsets[0].escape_length * vec3f(1.0, -1.0, -1.0) + 
+    //     iteration_results.offsets[1].escape_length * vec3f(-1.0, -1.0, 1.0) +
+    //     iteration_results.offsets[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
+    //     iteration_results.offsets[3].escape_length * vec3f(1.0, 1.0, 1.0)
+    // );
+    var surface_normal = normalize(
+        iteration_results.offsets[0].position + 
+        iteration_results.offsets[1].position +
+        iteration_results.offsets[2].position + 
+        iteration_results.offsets[3].position - 4.0*iteration_results.center.position).xyz;
+
 
     return Hit(
         object_index,
