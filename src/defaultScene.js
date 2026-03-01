@@ -17,6 +17,11 @@ const settings = {
   fractal_settings: {
     julia_c: { x: 0.0, y: 0.0, z: 0.0 },
     julia_mode: true,
+    bailout_value: 16.0,
+    iterations: 15,
+    offset_multiplier: 0.01,
+    max_marching_steps: 250,
+    raystep_multiplier: 1.0,
   },
   sky_color: { r: 0.02, g: 0.03, b: 0.05 },
   time: 0.0,

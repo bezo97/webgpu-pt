@@ -235,6 +235,36 @@ export default class GUI {
       min: -5,
       max: 5,
     });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "bailout_value", {
+      label: "Bailout value",
+      min: 0.01,
+      max: 100000,
+      step: 0.01,
+    });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "iterations", {
+      label: "Iterations",
+      min: 1,
+      max: 100,
+      step: 1,
+    });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "offset_multiplier", {
+      label: "Offset multiplier",
+      min: 0.0001,
+      max: 1,
+      step: 0.0001,
+    });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "max_marching_steps", {
+      label: "Max marching steps",
+      min: 1,
+      max: 500,
+      step: 1,
+    });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "raystep_multiplier", {
+      label: "Raystep multiplier",
+      min: 0.01,
+      max: 1,
+      step: 0.01,
+    });
   };
 
   setupSceneSettings = () => {

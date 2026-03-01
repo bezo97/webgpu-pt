@@ -10,6 +10,11 @@ const no_hit = Hit(-1, -1.0, vec3f(0.0), vec3f(0.0));
 struct FractalSettings {
     julia_c: vec3f,
     julia_mode: f32,//bool
+    bailout_value: f32,
+    iterations: f32,
+    offset_multiplier: f32,
+    max_marching_steps: f32,
+    raystep_multiplier: f32,
 }
 
 struct SceneMaterial {
@@ -224,7 +229,7 @@ var<private> light_seq_index: u32 = 1;
 fn cosWeightedRandomHemisphereDirection(n: vec3f, seq_index: ptr<private, u32>) -> vec3f {
     let r = r2(*seq_index);
     *seq_index++;
-    let uu = normalize(cross(n, vec3(0.0,1.0,1.0)));
+    let uu = normalize(cross(n, vec3f(0.0,1.0,1.0)));
     let vv = cross(uu, n);
     let ra = sqrt(r.y);
     let rx = ra*cos(2.0*PI*r.x);
@@ -335,7 +340,7 @@ fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> ve
             return fractal_amoser_sine_iterate(p, 1.0, c);
         }
         case 3: {
-            return fractal_mandelbox_iterate(p, 2.0, c);
+            return fractal_mandelbox_iterate(p, 2.62, c);
         }
         case default: {
             return vec4f(0.0);
@@ -346,38 +351,32 @@ fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> ve
 fn compute_fractal_state(pos: vec3f, de_object: SceneObject, c: vec4f, max_iter: i32) -> IterationLoopResult {
     var p: vec4f = vec4f(pos, 1.0);
     var r2: f32 = 0.0;
-    var iter_count: i32 = 0;
     var orbit_trap_min: f32 = 1e20;
     
-    for (var i: i32 = 0; i < max_iter; i++) {
+    var i: i32 = 0;
+    for (; i < max_iter; i++) {
         p = fractal_iteration_step(de_object, p, c);
         r2 = dot(p.xyz, p.xyz);
-        iter_count = i + 1;
         orbit_trap_min = min(orbit_trap_min, r2);
-        if (r2 > 16.0) {
+        if (r2 > settings.fractal_settings.bailout_value) {
             break;
         }
     }
-    
+    let iter_count = i + 1;
     let escape_length = length(p.xyz);
-    let iter_f = f32(iter_count);
     
-    var potential: f32;
-    if (r2 > 16.0) {
-        potential = log(escape_length) * iter_f / escape_length; //not sure this is good in general
-        //potential = log(escape_length) / pow(8.0, iter_f); // example for pow8 Mandelbulb-like fractals
-    } else {
-        potential = 0.0;
-    }
+    let potential = log(escape_length) * f32(iter_count) / escape_length; //not sure this is good in general
+    //let potential = log(escape_length) / pow(8.0, f32(iter_count)); // example for pow8 Mandelbulb-like fractals
     
-    return IterationLoopResult(escape_length, potential, r2 > 16.0, orbit_trap_min, p);
+    let escaped = r2 > settings.fractal_settings.bailout_value;
+    return IterationLoopResult(escape_length, potential, escaped, orbit_trap_min, p);
 }
 
-fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, surface_eps: f32) -> DEResults {
+fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offset_eps: f32) -> DEResults {
     //transform by object's translation/scale
     var pos = (pos0 - de_object.position) / de_object.scale;
 
-    var iterations = 15;
+    var iterations = i32(settings.fractal_settings.iterations);
     if (fast_eval) {
         iterations = 5;
     }
@@ -390,14 +389,12 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, surfa
 
     let iteration_result = compute_fractal_state(pos, de_object, c, iterations);
 
-    // Check if inside fractal (potential is 0 or didn't escape)
-    if (iteration_result.potential <= 0.0 || iteration_result.escape_length < 0.1) {
+    if (!iteration_result.escaped) {
         return DEResults(0.0, iteration_result, array<IterationLoopResult, 4>(iteration_result, iteration_result, iteration_result, iteration_result));
     }
 
     // Compute numerical gradient using finite differences
-    let offset = 0.01*EPS; // TODO: implement parameter to control this
-    let offsetResults = get_tetrahedron_offsets(pos, de_object, offset, c, iterations);
+    let offsetResults = get_tetrahedron_offsets(pos, de_object, offset_eps, c, iterations);
     let rx = offsetResults[0];
     let ry = offsetResults[1];
     let rz = offsetResults[2];
@@ -410,7 +407,7 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, surfa
         //makin-buddhi de:
         // DE = 0.5 * r * log(r) / |grad(r)|
         let grad = vec4f(rx.escape_length, ry.escape_length, rz.escape_length, rw.escape_length) - vec4f(iteration_result.escape_length);
-        let grad_len = length(grad / offset);
+        let grad_len = length(grad / offset_eps);
         de = 0.5 * iteration_result.escape_length * log(iteration_result.escape_length) / grad_len;
     }
     else if(0.0 == 0.0)
@@ -419,7 +416,7 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, surfa
         // DE = (0.5 / exp(G)) * sinh(G) / |grad(G)|
         let G = iteration_result.potential;
         let grad = vec4f(rx.potential, ry.potential, rz.potential, rw.potential) - vec4f(G);
-        let grad_len = length(grad / offset);
+        let grad_len = length(grad / offset_eps);
         let sinh_G = (exp(G) - exp(-G)) / 2.0;// Using sinh(G) approximation for numerical stability
         de = (0.5 / exp(G)) * sinh_G / grad_len;
     }
@@ -429,7 +426,7 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, surfa
         // DE = G / |grad(G)|
         let G = iteration_result.potential;
         let grad = vec4f(rx.potential, ry.potential, rz.potential, rw.potential) - vec4f(G);
-        let grad_len = length(grad / offset);
+        let grad_len = length(grad / offset_eps);
         de =  G / grad_len;
     }
 
@@ -465,21 +462,23 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     //start estimation on bounds
     var total_distance = max(EPS, bounding_sphere_t1t2.x);
 
-    var max_marching_steps = 500;
-    var raystep_multiplier = 0.95;//aka. fuzzy factor
+    var max_marching_steps = i32(settings.fractal_settings.max_marching_steps);
+    var raystep_multiplier = settings.fractal_settings.raystep_multiplier;
     if(fast_eval) {
         max_marching_steps = 100;
         raystep_multiplier = 1.0;
     }
 
     let pixel_angular_resolution = 2.0*tan((settings.cam.fov_angle * PI / 180.0)*0.5) / settings.width; //TODO: this could be a uniform
-    var surface_eps = EPS;
+    var hit_eps = EPS;
+    var offset_eps = EPS;
     var is_surface_hit = false;
     var iteration_results: DEResults;
     for(var i = 0; i < max_marching_steps; i++)
     {
         let pos = ray.pos + ray.dir * total_distance;
-        iteration_results = estimate_distance(pos, fractal_object, fast_eval, surface_eps);
+        offset_eps = settings.fractal_settings.offset_multiplier * hit_eps * 0.5;
+        iteration_results = estimate_distance(pos, fractal_object, fast_eval, offset_eps);
     
         let raystep_estimate = iteration_results.de * raystep_multiplier;
 
@@ -490,12 +489,12 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         }
 
         let distance_to_camera = length(settings.cam.position - pos);
-        surface_eps = max(EPS, 0.1*distance_to_camera * pixel_angular_resolution);
+        hit_eps = max(EPS, 0.1*distance_to_camera * pixel_angular_resolution);
         if(fast_eval) {
-            surface_eps *= 100.0;
+            hit_eps *= 100.0;
         }
 
-        if(abs(raystep_estimate) < surface_eps)
+        if(abs(raystep_estimate) < hit_eps)
         {
             is_surface_hit = true;
             break;
@@ -506,21 +505,15 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
-    total_distance -= 2.0*surface_eps; //move back a bit to avoid self-intersection problems
+    total_distance -= 2.0*hit_eps; //move back a bit to avoid self-intersection problems
     let hit_pos = ray.pos + ray.dir * total_distance;
 
-    // var surface_normal = normalize(
-    //     iteration_results.offsets[0].escape_length * vec3f(1.0, -1.0, -1.0) + 
-    //     iteration_results.offsets[1].escape_length * vec3f(-1.0, -1.0, 1.0) +
-    //     iteration_results.offsets[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
-    //     iteration_results.offsets[3].escape_length * vec3f(1.0, 1.0, 1.0)
-    // );
-    var surface_normal = normalize(
-        iteration_results.offsets[0].position + 
-        iteration_results.offsets[1].position +
-        iteration_results.offsets[2].position + 
-        iteration_results.offsets[3].position - 4.0*iteration_results.center.position).xyz;
-
+    let surface_normal = normalize(
+        iteration_results.offsets[0].escape_length * vec3f(1.0, -1.0, -1.0) + 
+        iteration_results.offsets[1].escape_length * vec3f(-1.0, -1.0, 1.0) +
+        iteration_results.offsets[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
+        iteration_results.offsets[3].escape_length * vec3f(1.0, 1.0, 1.0)
+    );
 
     return Hit(
         object_index,
