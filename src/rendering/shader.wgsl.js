@@ -348,10 +348,16 @@ fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> ve
     }
 }
 
-fn compute_fractal_state(pos: vec3f, de_object: SceneObject, c: vec4f, max_iter: i32) -> IterationLoopResult {
+fn compute_fractal_state(pos: vec3f, de_object: SceneObject, max_iter: i32) -> IterationLoopResult {
     var p: vec4f = vec4f(pos, 1.0);
     var r2: f32 = 0.0;
     var orbit_trap_min: f32 = 1e20;
+
+    // Julia mode handling for the refinement
+    var c: vec4f = p;
+    if (settings.fractal_settings.julia_mode > 0.0) {
+        c = vec4f(settings.fractal_settings.julia_c, 1.0);
+    }
     
     var i: i32 = 0;
     for (; i < max_iter; i++) {
@@ -381,20 +387,14 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
         iterations = 5;
     }
     
-    // Julia mode handling
-    var c: vec4f = vec4f(pos, 1.0);
-    if (settings.fractal_settings.julia_mode > 0.0) {
-        c = vec4f(settings.fractal_settings.julia_c, 1.0);
-    }
-
-    let iteration_result = compute_fractal_state(pos, de_object, c, iterations);
+    let iteration_result = compute_fractal_state(pos, de_object, iterations);
 
     if (!iteration_result.escaped) {
         return DEResults(0.0, iteration_result, array<IterationLoopResult, 4>(iteration_result, iteration_result, iteration_result, iteration_result));
     }
 
     // Compute numerical gradient using finite differences
-    let offsetResults = get_tetrahedron_offsets(pos, de_object, offset_eps, c, iterations);
+    let offsetResults = get_tetrahedron_offsets(pos, de_object, offset_eps, iterations);
     let rx = offsetResults[0];
     let ry = offsetResults[1];
     let rz = offsetResults[2];
@@ -436,16 +436,16 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
     return DEResults(de, iteration_result, offsetResults);
 }
 
-fn get_tetrahedron_offsets(p_center: vec3f, de_object: SceneObject, offset_eps: f32, c: vec4f, iterations: i32) -> array<IterationLoopResult, 4> {
+fn get_tetrahedron_offsets(p_center: vec3f, de_object: SceneObject, offset_eps: f32, iterations: i32) -> array<IterationLoopResult, 4> {
     let k1 = vec3f(1.0, -1.0, -1.0);
     let k2 = vec3f(-1.0, -1.0, 1.0);
     let k3 = vec3f(-1.0, 1.0, -1.0);
     let k4 = vec3f(1.0, 1.0, 1.0);
     return array<IterationLoopResult, 4>(
-        compute_fractal_state(p_center + offset_eps * k1, de_object, c, iterations),
-        compute_fractal_state(p_center + offset_eps * k2, de_object, c, iterations),
-        compute_fractal_state(p_center + offset_eps * k3, de_object, c, iterations),
-        compute_fractal_state(p_center + offset_eps * k4, de_object, c, iterations)
+        compute_fractal_state(p_center + offset_eps * k1, de_object, iterations),
+        compute_fractal_state(p_center + offset_eps * k2, de_object, iterations),
+        compute_fractal_state(p_center + offset_eps * k3, de_object, iterations),
+        compute_fractal_state(p_center + offset_eps * k4, de_object, iterations)
     );
 
 }
@@ -460,7 +460,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     }
 
     //start estimation on bounds
-    var total_distance = max(EPS, bounding_sphere_t1t2.x);
+    var estimated_distance = max(EPS, bounding_sphere_t1t2.x);
 
     var max_marching_steps = i32(settings.fractal_settings.max_marching_steps);
     var raystep_multiplier = settings.fractal_settings.raystep_multiplier;
@@ -476,20 +476,20 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     var iteration_results: DEResults;
     for(var i = 0; i < max_marching_steps; i++)
     {
-        let pos = ray.pos + ray.dir * total_distance;
+        let pos = ray.pos + ray.dir * estimated_distance;
         offset_eps = settings.fractal_settings.offset_multiplier * hit_eps * 0.5;
         iteration_results = estimate_distance(pos, fractal_object, fast_eval, offset_eps);
     
         let raystep_estimate = iteration_results.de * raystep_multiplier;
 
-        total_distance += raystep_estimate;
+        estimated_distance += raystep_estimate;
 
-        if(total_distance > bounding_sphere_t1t2.y) {
+        if(estimated_distance > bounding_sphere_t1t2.y) {
             return no_hit;//ray intersected the bounding sphere but not the fractal
         }
 
         let distance_to_camera = length(settings.cam.position - pos);
-        hit_eps = max(EPS, 0.1*distance_to_camera * pixel_angular_resolution);
+        hit_eps = max(EPS,distance_to_camera * pixel_angular_resolution);
         if(fast_eval) {
             hit_eps *= 100.0;
         }
@@ -505,19 +505,56 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         return no_hit;
     }
 
-    total_distance -= 2.0*hit_eps; //move back a bit to avoid self-intersection problems
-    let hit_pos = ray.pos + ray.dir * total_distance;
+    // After initial raymarching finds a point near the surface, binary search for more precise intersection
+    // figure out search range
+    var t_near: f32;
+    var t_far: f32;
+    if (iteration_results.center.escaped) {
+        // iteration escaped, position is outside, surface is ahead
+        t_near = estimated_distance;
+        t_far = estimated_distance + hit_eps;
+    } else {
+        let last_raystep = iteration_results.de * raystep_multiplier;
+        // iteration did not escape, position is inside, surface is behind
+        t_near = estimated_distance - last_raystep;
+        t_far = estimated_distance;
+    }
+    let binary_search_steps = /*10*/i32(settings.render_settings.russian_roulette_start_bounce);
+    for (var i = 0; i < binary_search_steps; i++) {
+        let t_mid = 0.5 * (t_far + t_near);
+        let pos_mid = ray.pos + ray.dir * t_mid;
+    
+        //transform by object's translation/scale
+        var pos_mid_tf = (pos_mid - fractal_object.position) / fractal_object.scale;
+        
+        // Evaluate fractal at midpoint
+        let state = compute_fractal_state(pos_mid_tf, fractal_object, i32(settings.fractal_settings.iterations));
+        
+        if (state.escaped) {
+            t_near = t_mid; // Midpoint is outside, move closer
+        } else {
+            t_far = t_mid; // Midpoint is inside, move back
+        }
+    }
+    var refined_distance = 0.5 * (t_near + t_far);
+    var refined_pos = ray.pos + ray.dir * refined_distance;
+    refined_pos = (refined_pos - fractal_object.position) / fractal_object.scale; //transform back
 
+    let final_offset_eps = settings.fractal_settings.offset_multiplier * hit_eps * 0.5;
+    let offset_results = get_tetrahedron_offsets(refined_pos, fractal_object, final_offset_eps, i32(settings.fractal_settings.iterations));
     let surface_normal = normalize(
-        iteration_results.offsets[0].escape_length * vec3f(1.0, -1.0, -1.0) + 
-        iteration_results.offsets[1].escape_length * vec3f(-1.0, -1.0, 1.0) +
-        iteration_results.offsets[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
-        iteration_results.offsets[3].escape_length * vec3f(1.0, 1.0, 1.0)
+        offset_results[0].escape_length * vec3f(1.0, -1.0, -1.0) + 
+        offset_results[1].escape_length * vec3f(-1.0, -1.0, 1.0) +
+        offset_results[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
+        offset_results[3].escape_length * vec3f(1.0, 1.0, 1.0)
     );
+    
+    refined_distance -= 2.0*hit_eps; //move back a bit to avoid self-intersection problems
+    let hit_pos = ray.pos + ray.dir * refined_distance;
 
     return Hit(
         object_index,
-        total_distance,
+        refined_distance,
         hit_pos,
         surface_normal
     );
@@ -821,8 +858,7 @@ fn trace_path(cam_ray: Ray) -> vec3f
     return result;
 }
 
-fn ACESFilm(color_in: vec3f) -> vec3f
-{
+fn ACESFilm(color_in: vec3f) -> vec3f {
     var color = color_in;
     color *= 0.6;
     let a = 2.51;
@@ -833,8 +869,7 @@ fn ACESFilm(color_in: vec3f) -> vec3f
     return clamp((color*(a*color+b)) / (color*(c*color+d)+e), vec3f(0.0), vec3f(1.0));
 }
 
-fn tonemap(color_in: vec3f) -> vec3f
-{
+fn tonemap(color_in: vec3f) -> vec3f {
     var color = color_in;
 
     color = ACESFilm(color);
