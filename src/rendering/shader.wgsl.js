@@ -334,7 +334,8 @@ fn fractal_mandelbox_iterate(p: vec4f, scale: f32, c: vec4f) -> vec4f
 fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> vec4f {    
     switch(i32(fractal_object.object_type)) { //TODO: option to select the fractal type
         case 1: {
-            return fractal_mandalay_iterate(10.0*p, c)/10.0;
+            return fractal_amoser_sine_iterate(p, 1.5, c);
+            // return fractal_mandalay_iterate(10.0*p, c)/10.0;
         }
         case 2: {
             return fractal_amoser_sine_iterate(p, 1.0, c);
@@ -480,8 +481,13 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         offset_eps = settings.fractal_settings.offset_multiplier * hit_eps * 0.5;
         iteration_results = estimate_distance(pos, fractal_object, fast_eval, offset_eps);
     
-        let raystep_estimate = iteration_results.de * raystep_multiplier;
+        if(abs(iteration_results.de) < hit_eps)
+        {
+            is_surface_hit = true;
+            break;
+        }
 
+        let raystep_estimate = iteration_results.de * raystep_multiplier;
         estimated_distance += raystep_estimate;
 
         if(estimated_distance > bounding_sphere_t1t2.y) {
@@ -492,12 +498,6 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         hit_eps = EPS * (1.0 + 10.0 * distance_to_camera * settings.width * pixel_angular_resolution);
         if(fast_eval) {
             hit_eps *= 100.0;
-        }
-
-        if(abs(raystep_estimate) < hit_eps)
-        {
-            is_surface_hit = true;
-            break;
         }
     }
 

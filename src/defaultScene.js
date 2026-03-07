@@ -23,7 +23,7 @@ const settings = {
     max_marching_steps: 250,
     raystep_multiplier: 1.0,
   },
-  sky_color: { r: 0.02, g: 0.03, b: 0.05 },
+  sky_color: { r: 0.72, g: 0.73, b: 0.95 },
   time: 0.0,
   width: 720,
   height: 720,
@@ -33,8 +33,8 @@ const objects = [
   {
     object_type: 1,
     material_id: "0",
-    position: { x: 0.0, y: -0.19, z: 0.0 },
-    scale: 5.23,
+    position: { x: 0.0, y: 0, z: 0.0 },
+    scale: 2,
   },
   {
     object_type: 0,
