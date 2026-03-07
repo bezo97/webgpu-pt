@@ -394,11 +394,11 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
     }
 
     // Compute numerical gradient using finite differences
-    let offsetResults = get_tetrahedron_offsets(pos, de_object, offset_eps, iterations);
-    let rx = offsetResults[0];
-    let ry = offsetResults[1];
-    let rz = offsetResults[2];
-    let rw = offsetResults[3];
+    let offset_results = get_tetrahedron_offsets(pos, de_object, offset_eps, iterations);
+    let rx = offset_results[0];
+    let ry = offset_results[1];
+    let rz = offset_results[2];
+    let rw = offset_results[3];
     
     //Some DE methods based on: http://blog.hvidtfeldts.net/index.php/2011/09/distance-estimated-3d-fractals-v-the-mandelbulb-different-de-approximations/
     var de: f32 = 0.0;
@@ -433,7 +433,7 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
     // transform back
     de = de * de_object.scale;
 
-    return DEResults(de, iteration_result, offsetResults);
+    return DEResults(de, iteration_result, offset_results);
 }
 
 fn get_tetrahedron_offsets(p_center: vec3f, de_object: SceneObject, offset_eps: f32, iterations: i32) -> array<IterationLoopResult, 4> {
@@ -489,7 +489,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         }
 
         let distance_to_camera = length(settings.cam.position - pos);
-        hit_eps = max(EPS,distance_to_camera * pixel_angular_resolution);
+        hit_eps = EPS * (1.0 + 10.0 * distance_to_camera * settings.width * pixel_angular_resolution);
         if(fast_eval) {
             hit_eps *= 100.0;
         }
@@ -504,7 +504,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     if(!is_surface_hit) {
         return no_hit;
     }
-
+    
     // After initial raymarching finds a point near the surface, binary search for more precise intersection
     // figure out search range
     var t_near: f32;
