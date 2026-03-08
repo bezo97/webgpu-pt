@@ -22,6 +22,7 @@ const settings = {
     offset_multiplier: 0.01,
     max_marching_steps: 250,
     raystep_multiplier: 1.0,
+    max_binary_search_steps: 10,
   },
   sky_color: { r: 0.72, g: 0.73, b: 0.95 },
   time: 0.0,

@@ -259,6 +259,12 @@ export default class GUI {
       max: 500,
       step: 1,
     });
+    fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "max_binary_search_steps", {
+      label: "Max binary search steps",
+      min: 0,
+      max: 15,
+      step: 1,
+    });
     fractalPane.addBinding(this.renderer.scene.settings.fractal_settings, "raystep_multiplier", {
       label: "Raystep multiplier",
       min: 0.01,

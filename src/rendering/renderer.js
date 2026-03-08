@@ -433,7 +433,7 @@ export class Renderer {
         scene.settings.fractal_settings.offset_multiplier,
         scene.settings.fractal_settings.max_marching_steps,
         scene.settings.fractal_settings.raystep_multiplier,
-        0.0,
+        scene.settings.fractal_settings.max_binary_search_steps,
         0.0,
         0.0,
         ...[scene.settings.sky_color.r, scene.settings.sky_color.g, scene.settings.sky_color.b],

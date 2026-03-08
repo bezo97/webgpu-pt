@@ -15,6 +15,7 @@ struct FractalSettings {
     offset_multiplier: f32,
     max_marching_steps: f32,
     raystep_multiplier: f32,
+    max_binary_search_steps: f32,
 }
 
 struct SceneMaterial {
@@ -390,10 +391,6 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
     
     let iteration_result = compute_fractal_state(pos, de_object, iterations);
 
-    if (!iteration_result.escaped) {
-        return DEResults(0.0, iteration_result, array<IterationLoopResult, 4>(iteration_result, iteration_result, iteration_result, iteration_result));
-    }
-
     // Compute numerical gradient using finite differences
     let offset_results = get_tetrahedron_offsets(pos, de_object, offset_eps, iterations);
     let rx = offset_results[0];
@@ -433,6 +430,11 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
 
     // transform back
     de = de * de_object.scale;
+
+    if(!iteration_result.escaped)
+    {// signed distance, surface is behind
+        de*=-1.0;
+    }
 
     return DEResults(de, iteration_result, offset_results);
 }
@@ -475,19 +477,21 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     var offset_eps = EPS;
     var is_surface_hit = false;
     var iteration_results: DEResults;
+    var raystep_estimate: f32 = EPS;
     for(var i = 0; i < max_marching_steps; i++)
     {
         let pos = ray.pos + ray.dir * estimated_distance;
         offset_eps = settings.fractal_settings.offset_multiplier * hit_eps * 0.5;
         iteration_results = estimate_distance(pos, fractal_object, fast_eval, offset_eps);
-    
-        if(abs(iteration_results.de) < hit_eps)
+
+        if(abs(iteration_results.de) < hit_eps //close to surface
+            || raystep_estimate * iteration_results.de < 0.0) // detect surface crossing
         {
             is_surface_hit = true;
             break;
         }
 
-        let raystep_estimate = iteration_results.de * raystep_multiplier;
+        raystep_estimate = iteration_results.de * raystep_multiplier;
         estimated_distance += raystep_estimate;
 
         if(estimated_distance > bounding_sphere_t1t2.y) {
@@ -509,18 +513,17 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
     // figure out search range
     var t_near: f32;
     var t_far: f32;
+    let last_raystep = abs(raystep_estimate);
     if (iteration_results.center.escaped) {
         // iteration escaped, position is outside, surface is ahead
         t_near = estimated_distance;
-        t_far = estimated_distance + hit_eps;
+        t_far = estimated_distance + last_raystep;
     } else {
-        let last_raystep = iteration_results.de * raystep_multiplier;
         // iteration did not escape, position is inside, surface is behind
         t_near = estimated_distance - last_raystep;
         t_far = estimated_distance;
     }
-    let binary_search_steps = /*10*/i32(settings.render_settings.russian_roulette_start_bounce);
-    for (var i = 0; i < binary_search_steps; i++) {
+    for (var i = 0; i < i32(settings.fractal_settings.max_binary_search_steps); i++) {
         let t_mid = 0.5 * (t_far + t_near);
         let pos_mid = ray.pos + ray.dir * t_mid;
     
@@ -542,7 +545,7 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
 
     let final_offset_eps = settings.fractal_settings.offset_multiplier * hit_eps * 0.5;
     let offset_results = get_tetrahedron_offsets(refined_pos, fractal_object, final_offset_eps, i32(settings.fractal_settings.iterations));
-    let surface_normal = normalize(
+    var surface_normal = normalize(
         offset_results[0].escape_length * vec3f(1.0, -1.0, -1.0) + 
         offset_results[1].escape_length * vec3f(-1.0, -1.0, 1.0) +
         offset_results[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
