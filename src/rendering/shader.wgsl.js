@@ -366,12 +366,16 @@ fn compute_fractal_state(pos: vec3f, de_object: SceneObject, max_iter: i32) -> I
         p = fractal_iteration_step(de_object, p, c);
         r2 = dot(p.xyz, p.xyz);
         orbit_trap_min = min(orbit_trap_min, r2);
-        if (r2 > settings.fractal_settings.bailout_value) {
+        if (r2 > settings.fractal_settings.bailout_value || r2 != r2) {
             break;
         }
     }
     let iter_count = i + 1;
-    let escape_length = length(p.xyz);
+    var escape_length = length(p.xyz);
+
+    if (escape_length != escape_length){ // handle NaN somehow
+        escape_length = settings.fractal_settings.bailout_value;
+    }
     
     let potential = log(escape_length) * f32(iter_count) / escape_length; //not sure this is good in general
     //let potential = log(escape_length) / pow(8.0, f32(iter_count)); // example for pow8 Mandelbulb-like fractals
@@ -551,9 +555,6 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         offset_results[2].escape_length * vec3f(-1.0, 1.0, -1.0) + 
         offset_results[3].escape_length * vec3f(1.0, 1.0, 1.0)
     );
-    
-    //TODO: temp broken normals on amoser's formula
-    surface_normal = normalize(ray.pos-refined_pos);
     
     refined_distance -= 2.0*hit_eps; //move back a bit to avoid self-intersection problems
     let hit_pos = ray.pos + ray.dir * refined_distance;
