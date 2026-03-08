@@ -552,6 +552,9 @@ fn intersect_fractal(ray: Ray, object_index: i32, fast_eval: bool) -> Hit
         offset_results[3].escape_length * vec3f(1.0, 1.0, 1.0)
     );
     
+    //TODO: temp broken normals on amoser's formula
+    surface_normal = normalize(ray.pos-refined_pos);
+    
     refined_distance -= 2.0*hit_eps; //move back a bit to avoid self-intersection problems
     let hit_pos = ray.pos + ray.dir * refined_distance;
 
