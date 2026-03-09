@@ -15,7 +15,7 @@ const settings = {
     russian_roulette_min_p_refract: 0.75,
   },
   fractal_settings: {
-    julia_c: { x: 0.0, y: 0.66, z: 0.33 },
+    julia_c: { x: 0.0, y: 0.0, z: 0.0 },
     julia_mode: false,
     bailout_value: 100.0,
     iterations: 15,
