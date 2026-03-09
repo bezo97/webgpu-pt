@@ -16,7 +16,7 @@ const settings = {
   },
   fractal_settings: {
     julia_c: { x: 0.0, y: 0.66, z: 0.33 },
-    julia_mode: true,
+    julia_mode: false,
     bailout_value: 100.0,
     iterations: 15,
     offset_multiplier: 0.01,

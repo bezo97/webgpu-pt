@@ -332,11 +332,13 @@ fn fractal_mandelbox_iterate(p: vec4f, scale: f32, c: vec4f) -> vec4f
     return vec4f(folded, p.w) * scale / clamp(dot(p.xyz, p.xyz), 0.5, 1.0) + c;
 }
 
+var<private> hybrid_index: i32 = 0;
+
 fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> vec4f {    
-    switch(i32(fractal_object.object_type)) { //TODO: option to select the fractal type
+    let ii = hybrid_index%3+1;
+    switch(ii) { //TODO: option to select the fractal type
         case 1: {
-            return fractal_amoser_sine_iterate(p, 1.0, c);
-            // return fractal_mandalay_iterate(10.0*p, c)/10.0;
+            return fractal_mandalay_iterate(10.0*p, c)/10.0;
         }
         case 2: {
             return fractal_amoser_sine_iterate(p, 1.0, c);
@@ -362,8 +364,10 @@ fn compute_fractal_state(pos: vec3f, de_object: SceneObject, max_iter: i32) -> I
     }
     
     var i: i32 = 0;
+    hybrid_index = 0;
     for (; i < max_iter; i++) {
         p = fractal_iteration_step(de_object, p, c);
+        hybrid_index++;
         r2 = dot(p.xyz, p.xyz);
         orbit_trap_min = min(orbit_trap_min, r2);
         if (r2 > settings.fractal_settings.bailout_value || r2 != r2) {
