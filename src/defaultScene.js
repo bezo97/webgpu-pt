@@ -15,9 +15,9 @@ const settings = {
     russian_roulette_min_p_refract: 0.75,
   },
   fractal_settings: {
-    julia_c: { x: 0.0, y: 0.0, z: 0.0 },
+    julia_c: { x: 0.0, y: 0.66, z: 0.33 },
     julia_mode: true,
-    bailout_value: 16.0,
+    bailout_value: 100.0,
     iterations: 15,
     offset_multiplier: 0.01,
     max_marching_steps: 250,
@@ -34,8 +34,8 @@ const objects = [
   {
     object_type: 1,
     material_id: "0",
-    position: { x: 0.0, y: 0, z: 0.0 },
-    scale: 2,
+    position: { x: 0.0, y: 1.0, z: 0.0 },
+    scale: 3.0,
   },
   {
     object_type: 0,

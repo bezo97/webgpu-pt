@@ -335,7 +335,7 @@ fn fractal_mandelbox_iterate(p: vec4f, scale: f32, c: vec4f) -> vec4f
 fn fractal_iteration_step(fractal_object: SceneObject, p: vec4f, c: vec4f) -> vec4f {    
     switch(i32(fractal_object.object_type)) { //TODO: option to select the fractal type
         case 1: {
-            return fractal_amoser_sine_iterate(p, 1.5, c);
+            return fractal_amoser_sine_iterate(p, 1.0, c);
             // return fractal_mandalay_iterate(10.0*p, c)/10.0;
         }
         case 2: {
@@ -404,7 +404,7 @@ fn estimate_distance(pos0: vec3f, de_object: SceneObject, fast_eval: bool, offse
     
     //Some DE methods based on: http://blog.hvidtfeldts.net/index.php/2011/09/distance-estimated-3d-fractals-v-the-mandelbulb-different-de-approximations/
     var de: f32 = 0.0;
-    if(0.0 == 0.0)
+    if(0.0 == 0.0) //TODO: selectable DE method
     {
         //makin-buddhi de:
         // DE = 0.5 * r * log(r) / |grad(r)|
